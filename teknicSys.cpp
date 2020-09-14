@@ -16,18 +16,18 @@ using namespace std;
 using namespace sFnd;
 
 int CheckMotorNetwork();
-void RunTrajPoints();
+void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead);
 void SendMotorCmd(int n);
 void SendMotorTrq(int n);
 void SendMotorGrp(bool IsTorque = false);
-int SolveParaBlend(int loop_i, bool showAttention = false);
+int RunParaBlend(double point[7], bool showAttention = false);
 int32_t ToMotorCmd(int motorID, double length);
 void TrjHome();
 bool CheckLimits();
 
 vector<string> comHubPorts;
 vector<INode*> nodeList; // create a list for each node
-vector<vector<double>> points, brickPos;
+vector<vector<double>> brickPos;
 vector<double> spcLimit;
 unsigned int portCount;
 const int nodeNum = 8; // !!!!! IMPORTANT !!!!! Put in the number of motors before compiling the programme
@@ -43,11 +43,11 @@ double a[6], b[6], c[6], d[6], e[6], f[6], g[6], tb[6]; // trajectory coefficien
 dynamixel::PortHandler *portHandler;
 dynamixel::PacketHandler *packetHandler;
 uint8_t dxl_error = 0; // Dynamixel error
-int32_t dxl1Pos = 0, dxl2Pos = 0, gpOpen = 800, gpClose = 1100; // define some position reading, and gripper commands
+int32_t dxl1Pos = 0, dxl2Pos = 0, gpOpen = 800, gpClose = 1100, neutralRot = 2048; // define some position reading, and gripper commands
 int dxl_comm_result, rotationG, gripperG;
 const int DXL1_ID = 10, DXL2_ID = 3; //dxl 1 is rotation motor, dxl 2 is gripper motor
 const int ADDR_TORQUE_ENABLE = 64, ADDR_GOAL_POSITION = 116, ADDR_PRESENT_POSITION = 132, ADDR_GOAL_CURRENT = 102, ADDR_PRESENT_CURRENT = 126; // Control table adresses
-const int LEN_GOAL_POSITION = 4, LEN_PRESENT_POSITION = 4, LEN_GOAL_CURRENT = 2, LEN_PRESENT_CURRENT = 2;
+const int LEN_GOAL_POSITION = 4, LEN_PRESENT_POSITION = 4, LEN_GOAL_CURRENT = 2, LEN_PRESENT_CURRENT = 2, DXL_THRESHOLD = 10;
 
 int main()
 {   
@@ -237,15 +237,15 @@ int main()
     }
     
     //// Read input .txt file
-cout << "Choose from menu for cable robot motion:\nt - Read from \"traj.csv\" file for pre-set trajectory\nm - Manual input using w,a,s,d,r,f\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
+    cout << "Choose from menu for cable robot motion:\nt - Read from \"bricks.csv\" file for brick positions\nm - Manual input using w,a,s,d,r,f\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
     do {
         cin >> cmd;
-        ifstream file ("traj.csv");
+        ifstream file ("bricks.csv");
         vector<double> row;
         string line, word, temp;
         switch (cmd){
             case 'i':    // Show menu
-                cout << "Choose from menu for cable robot motion:\nt - Read from \"traj.csv\" file for pre-set trajectory\nm - Manual input using w,a,s,d,r,f\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
+                cout << "Choose from menu for cable robot motion:\nt - Read from \"bricks.csv\" file for brick positions\nm - Manual input using w,a,s,d,r,f\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
                 break;
             case 't':   // Read traj file
             case 'T':
@@ -266,7 +266,7 @@ cout << "Choose from menu for cable robot motion:\nt - Read from \"traj.csv\" fi
                     cout << "Failed to read input file. Exit programme." << endl;
                     return -1;
                 }
-                // RunTrajPoints();
+                RunBricksTraj(groupSyncRead);
                 break;
             case 'm':   // Manual wasdrf
             case 'M':
@@ -276,11 +276,11 @@ cout << "Choose from menu for cable robot motion:\nt - Read from \"traj.csv\" fi
                     switch(cmd){
                         case 'I':
                         case 'i':
-                            if(packetHandler->write4ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_POSITION, gpClose, &dxl_error)){ cout << "Error in closing gripper\n"; };
+                            if(packetHandler->write4ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_POSITION, gpClose, &dxl_error)){ cout << "Error in closing gripper\n"; }
                             continue;
                         case 'O':
                         case 'o':
-                            if(packetHandler->write4ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_POSITION, gpOpen, &dxl_error)){ cout << "Error in closing gripper\n"; };
+                            if(packetHandler->write4ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_POSITION, gpOpen, &dxl_error)){ cout << "Error in opening gripper\n"; }
                             continue;
                         case 'P':
                         case 'p':
@@ -377,38 +377,9 @@ cout << "Choose from menu for cable robot motion:\nt - Read from \"traj.csv\" fi
 
     //// Plan trajectory, include gripper motion
 
+
     //// Run motion and loop, update progress .txt
-    cout << "Pick from menu:\nr - Read present position\na - Rotation angle\np - Gripper position\nq- quit\n";
-    while(cmd != 'q'){
-        cmd = getch();
-        switch(cmd){
-            case 'r':
-                if(groupSyncRead.txRxPacket()){ cout << "Comm result: " << dxl_comm_result << endl; }
-                // Get present position value
-                dxl1Pos = groupSyncRead.getData(DXL1_ID, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION);
-                dxl2Pos = groupSyncRead.getData(DXL2_ID, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION);
-                printf("[ID:%03d] PresPos:%03d\t[ID:%03d] PresPos:%03d\n", DXL1_ID, dxl1Pos, DXL2_ID, dxl2Pos);
-                break;
-            case 'a':
-                cout << "Rotaiton: ";
-                cin >> rotationG;
-                if(cin.good()){
-                    rotationG *= 11.26666;
-                    if(packetHandler->write4ByteTxRx(portHandler, DXL1_ID, ADDR_GOAL_POSITION, rotationG, &dxl_error)){ cout << "Error in 'a' command\n"; };
-                }
-                break;
-            case 'p':
-                cout << "Gripper position: ";
-                cin >> gripperG;
-                if(cin.good()){
-                    cout << "hi\n";
-                    if(packetHandler->write4ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_POSITION, gripperG, &dxl_error)){ cout << "Error in 'p' command\n"; };
-                }
-                break;
-            default:
-                break;
-        }
-    }
+    
     
     //// Reverse motion??
 
@@ -496,16 +467,17 @@ int CheckMotorNetwork() {
     return 0;
 }
 
-int SolveParaBlend(int loop_i, bool showAttention){
+int RunParaBlend(double point[7], bool showAttention){
     // make them accessable from outside??
     float vMax[6] = {.4, .4, .4, 0.8, 0.8, 0.8}; // m/s, define the maximum velocity for each DoF
     float aMax[6] = {50, 50, 50, 10, 10, 10}; // m/s^2, define the maximum acceleration for each DoF
     double sQ[6], Q[6], o[6];
-    double dura = points[loop_i][6];
+    double dura = point[6];
     
+    // Solve parabolic blend coefficients for each DoF
     for(int i = 0; i < 6; i++){
-        sQ[i] = in1[i];
-        Q[i] = points[loop_i][i];
+        sQ[i] = in1[i]; // start point, from current position
+        Q[i] = point[i]; // end point, from goal position
         vMax[i] /= 1000; // change the velocity unit to meter per ms
         aMax[i] /= 1000000; // change the unit to meter per ms square
         tb[i] = dura - (Q[i] - sQ[i]) / vMax[i];
@@ -535,63 +507,111 @@ int SolveParaBlend(int loop_i, bool showAttention){
         f[i] = 2 * o[i] * dura;
         g[i] = -o[i];
     }
+    
+    // Run the trajectory till the given time is up
+    double t = 0;
+    char cmd;
+    while (t <= point[6]){
+        auto start = chrono::steady_clock::now();
+        long dur = 0;
+        
+        // PARABOLIC BLEND equation, per time step pose
+        for (int j = 0; j < 6; j++){
+            if (t <= tb[j]){
+                in1[j] = a[j] + b[j] * t * t;
+            }
+            else if(t <= point[6]-tb[j]){
+                in1[j] = c[j] + d[j] * t;
+            }
+            else{
+                in1[j] = e[j] + f[j] * t + g[j] * t * t;
+            }
+        }
+        // get absolute cable lengths in meters
+        cout << "IN: "<< in1[0] << " " << in1[1] << " " << in1[2] << " " << in1[3] << " " << in1[4] << " " << in1[5] << endl;
+        pose_to_length(in1, out1);
+        cout << "OUT: "<<  out1[0] << "\t" << out1[1] << "\t" << out1[2] << "\t" << out1[3] << "\t" <<  out1[4] << "\t" << out1[5] << "\t" << out1[6] << "\t" << out1[7] << endl;
+
+        SendMotorGrp();
+
+        auto end = chrono::steady_clock::now();
+        dur = chrono::duration_cast<chrono::milliseconds>(end-start).count();
+        
+        double dif = MILLIS_TO_NEXT_FRAME - dur - 1;
+        if(dif > 0) { Sleep(dif);}
+        t += MILLIS_TO_NEXT_FRAME;
+
+        if(kbhit()){ // Emergency quit during trajectory control
+            cout << "\nSystem interrupted!! Do you want to quit the trajectory control?\nq - Quit trajectory\nr - Resume trajectory\n";
+            cin >> cmd;
+            if(cmd == 'q' || cmd == 'Q'){
+                cout << "Trajectory emergency quit\n";
+                return -2;
+            }
+        }
+    }
     return 0;
 }
 
-void RunTrajPoints(){
-    char cmd;
-    // Go through the given points
-    for (int i = 0; i < points.size(); i++) {
-        double t = 0;
-        // trajectory generation and points splitting
-        if(SolveParaBlend(i, true) < 0) {
-            cout << "Trajectory aborted.\n";
-            return; 
-        }
-        cout << a[0] << ", " << b[0] << ", " << c[0] << ", " << d[0] << ", " << e[0] << ", " << f[0] << ", "<< g[0] << ", "<< tb[0] << endl;
+void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead){
+    double brickPickUp[7] = {0.1, 0.1, 2, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!
+    double safePt[3] = {0.2, 1, 2.1}; // a safe area near to the arm
+    double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
+    double velLmt = 0.15; // meters per second
+    double safeT = 1500; // in ms, time to raise to safety height
+    double safeH = 0.06; // meter, safety height from building brick level
+    double dura = 0;
+    
+    // Go through the given bricks
+    for (int i = 0; i < brickPos.size(); i++) {
+        // Go pick up a brick
+        if(packetHandler->write4ByteTxRx(portHandler, DXL1_ID, ADDR_GOAL_POSITION, neutralRot, &dxl_error)){ cout << "Error in rotating gripper\n"; return; }
+        Sleep(10); // short break between RS-485 communication
+        if(packetHandler->write4ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_POSITION, gpOpen, &dxl_error)){ cout << "Error in opening gripper\n"; return; }
+        brickPickUp[6] = sqrt(pow(brickPickUp[0]-in1[0],2)+pow(brickPickUp[1]-in1[1],2)+pow(brickPickUp[2]-in1[2],2))/velLmt*1000; // calculate time
+        if(RunParaBlend(brickPickUp, true) < 0) { cout << "Trajectory aborted.\n"; return; }
+        if(packetHandler->write4ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_POSITION, gpClose, &dxl_error)){ cout << "Error in closing gripper\n"; return; }
+        do{ // wait till gripper is closed
+            if(dxl_comm_result = groupSyncRead.txRxPacket()){ cout << "Comm error in reading packet: " << dxl_comm_result << endl; } 
+            // Get present position value
+            dxl1Pos = groupSyncRead.getData(DXL1_ID, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION);
+            dxl2Pos = groupSyncRead.getData(DXL2_ID, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION);
+            printf("[ID:%03d] PresPos:%03d\t[ID:%03d] PresPos:%03d\n", DXL1_ID, dxl1Pos, DXL2_ID, dxl2Pos);
+        }while((abs(neutralRot - dxl1Pos) > DXL_THRESHOLD) || (abs(gpClose - dxl2Pos) > DXL_THRESHOLD));
+
+        // Go to building level
+        copy(brickPickUp, brickPickUp+2, begin(goalPos));
+        goalPos[2] += 0.16;
+        goalPos[6] = safeT;
+        if(RunParaBlend(goalPos, true) < 0) { cout << "Trajectory aborted.\n"; return; } // raise the brick from robot arm
+        rotationG = brickPos[i][3] * 11.26666;; // conversion from angle to motor command
+        if(packetHandler->write4ByteTxRx(portHandler, DXL1_ID, ADDR_GOAL_POSITION, rotationG, &dxl_error)){ cout << "Error in rotating gripper\n"; return; }
+        copy(safePt, safePt+1, begin(goalPos)); // safe x,y position
+        goalPos[2] = brickPos[i][2] + safeH; // brick level
+        goalPos[6] = sqrt(pow(goalPos[0]-in1[0],2)+pow(goalPos[1]-in1[1],2)+pow(goalPos[2]-in1[2],2))/velLmt*1000;
+        if(RunParaBlend(goalPos, true) < 0) { cout << "Trajectory aborted.\n"; return; } // raise the brick to building level
+
+        // Go to brick placing position
+        goalPos[0] = brickPos[i][0];                       
+        goalPos[1] = brickPos[i][1];
+        goalPos[6] = sqrt(pow(goalPos[0]-in1[0],2)+pow(goalPos[1]-in1[1],2))/velLmt*1000;
+        if(RunParaBlend(goalPos, true) < 0) { cout << "Trajectory aborted.\n"; return; }
+
+        // Place brick
+        goalPos[2] -= safeH;
+        goalPos[6] = safeT;
+        if(RunParaBlend(goalPos, true) < 0) { cout << "Trajectory aborted.\n"; return; }
+        if(packetHandler->write4ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_POSITION, gpOpen, &dxl_error)){ cout << "Error in opening gripper\n"; return; }
         
-        while (t <= points[i][6]){
-            auto start = chrono::steady_clock::now();
-            long dur = 0;
-            
-            // PARABOLIC BLEND equation, per time step pose
-            for (int j = 0; j < 6; j++){
-                if (t <= tb[j]){
-                    in1[j] = a[j] + b[j] * t * t;
-                }
-                else if(t <= points[i][6]-tb[j]){
-                    in1[j] = c[j] + d[j] * t;
-                }
-                else{
-                    in1[j] = e[j] + f[j] * t + g[j] * t * t;
-                }
-            }
-            // get absolute cable lengths in meters
-            cout << "IN: "<< in1[0] << " " << in1[1] << " " << in1[2] << " " << in1[3] << " " << in1[4] << " " << in1[5] << endl;
-            pose_to_length(in1, out1);
-            cout << "OUT: "<<  out1[0] << "\t" << out1[1] << "\t" << out1[2] << "\t" << out1[3] << "\t" <<  out1[4] << "\t" << out1[5] << "\t" << out1[6] << "\t" << out1[7] << endl;
-
-            SendMotorGrp();
-
-            auto end = chrono::steady_clock::now();
-            dur = chrono::duration_cast<chrono::milliseconds>(end-start).count();
-            
-            double dif = MILLIS_TO_NEXT_FRAME - dur - 1;
-            if(dif > 0) { Sleep(dif);}
-            t += MILLIS_TO_NEXT_FRAME;
-
-            if(kbhit()){ // Emergency quit during trajectory control
-                cout << "\nSystem interrupted!! Do you want to quit the trajectory control?\nq - Quit trajectory\nr - Resume trajectory\n";
-                cin >> cmd;
-                if(cmd == 'q' || cmd == 'Q'){
-                    cout << "Trajectory control aborted.\n";
-                    t = points[i][6];
-                    i = points.size();
-                    break;
-                }
-            }
-        }
-        cout << "----------Completed point " << i + 1 <<"----------" << endl;
+        // Rise and leave building area, stand by for next brick pick up
+        goalPos[2] += safeH;
+        if(RunParaBlend(goalPos, true) < 0) { cout << "Trajectory aborted.\n"; return; } // leave building level
+        if(packetHandler->write4ByteTxRx(portHandler, DXL1_ID, ADDR_GOAL_POSITION, neutralRot, &dxl_error)){ cout << "Error in rotating gripper\n"; return; }
+        copy(begin(safePt), end(safePt), begin(goalPos)); // safe x,y position
+        goalPos[6] = sqrt(pow(goalPos[0]-in1[0],2)+pow(goalPos[1]-in1[1],2)+pow(goalPos[2]-in1[2],2))/velLmt*1000;
+        if(RunParaBlend(goalPos, true) < 0) { cout << "Trajectory aborted.\n"; return; } // return to safe point 
+        
+        cout << "----------Completed brick #" << i + 1 <<"----------" << endl;
     }
 }
 
