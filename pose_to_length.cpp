@@ -6,19 +6,19 @@
 using namespace Eigen;
 using namespace std;
 
-void pose_to_length(double pose[], double lengths[]){
+void pose_to_length(double pose[], double lengths[], double rail_offset){
 ////////////////////////////////// Define the cable robot parameters here !! //////////////////////////////////
     const int CABLE_NUM = 8;
 
-    Vector3d frmOut[CABLE_NUM]; // coordinates of the fixed outlets on frame
+    Vector3d frmOut[CABLE_NUM]; // coordinates of the attachment points on frame at the beginning
     frmOut[0] << 2.683, 0.0505, 3.372;
     frmOut[1] << -0.175, 0.0795, 3.375;
-    frmOut[2] << 2.614, 0.0325, 0.050;
-    frmOut[3] << 0.000, 0.0325, 0.050;
-    frmOut[4] << 3.287, -6.5255, 3.555;
-    frmOut[5] << -0.6805, -6.4305, 3.610;
-    frmOut[6] << 3.068, -6.5075, 0.088;
-    frmOut[7] << -0.553, -6.4445, 0.077;
+    frmOut[2] << 3.287, -6.5255, 3.555;
+    frmOut[3] << -0.6805, -6.4305, 3.610;
+    frmOut[4] << 2.614, 0.0325, 0.050 + rail_offset; //motors connected to linear rails
+    frmOut[5] << 0.000, 0.0325, 0.050 + rail_offset;
+    frmOut[6] << 3.068, -6.5075, 0.088 + rail_offset;
+    frmOut[7] << -0.553, -6.4445, 0.077 + rail_offset;
 
     Vector3d frmOutUnitV[CABLE_NUM]; // unit vectors/directions of the fixed cable attachments on frame
     for(int i = 0; i < CABLE_NUM; i++){ frmOutUnitV[i] << 0, 0, 1; }
@@ -26,10 +26,10 @@ void pose_to_length(double pose[], double lengths[]){
     Vector3d endOut[CABLE_NUM]; // local coordinates of cable attachment points on end-effector, ie ^er_B
     endOut[0] << 0.071, 0.050, -0.225;
     endOut[1] << -0.086, 0.050, -0.225;
-    endOut[2] << 0.1675, 0.045, 0.225;
-    endOut[3] << -0.1675, 0.045, 0.225;
-    endOut[4] << 0.071, -0.050, -0.225;
-    endOut[5] << -0.086, -0.050, -0.225; 
+    endOut[2] << 0.071, -0.050, -0.225;
+    endOut[3] << -0.086, -0.050, -0.225;
+    endOut[4] << 0.1675, 0.045, 0.225;
+    endOut[5] << -0.1675, 0.045, 0.225;
     endOut[6] << 0.1675, -0.045, 0.225;
     endOut[7] << -0.1675, -0.045, 0.225;
 
@@ -71,6 +71,7 @@ void pose_to_length(double pose[], double lengths[]){
         double l_arc = pRadius * acos(UVecCF.dot(UVecCA));
 
         ///// Sum the total cable length /////
-        lengths[i] = l_arc + (orA[i] - orB[i]).norm();
+        lengths[i] = l_arc + (orA[i] - orB[i]).norm() - rail_offset;
     }
+    lengths[CABLE_NUM] = lengths[CABLE_NUM+1] = lengths[CABLE_NUM+2] = lengths[CABLE_NUM+3] = rail_offset;
 }

@@ -17,10 +17,7 @@ using namespace sFnd;
 
 int CheckMotorNetwork();
 void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead);
-void SendMotorCmd(int n);
-void SendMotorTrq(int n);
-void SendMotorGrp(bool IsTorque = false);
-int RunParaBlend(double point[7], bool showAttention = false);
+void SendMotorGrp(bool IsTorque = false, bool IsLinearRail = false);
 int32_t ToMotorCmd(int motorID, double length);
 void TrjHome();
 bool CheckLimits();
@@ -30,14 +27,15 @@ vector<INode*> nodeList; // create a list for each node
 vector<vector<double>> brickPos;
 vector<double> spcLimit;
 unsigned int portCount;
-const int nodeNum = 8; // !!!!! IMPORTANT !!!!! Put in the number of motors before compiling the programme
+const int NodeNum = 8; // !!!!! IMPORTANT !!!!! Put in the number of motors before compiling the programme
 double step = 0.01; // in meters, for manual control
 float targetTorque = -2.5; // in %, -ve for tension, also need to UPDATE in switch case 't'!!!!!!!!!
 const int MILLIS_TO_NEXT_FRAME = 35; // note the basic calculation time is abt 16ms
 double home[6] = {2.211, -3.482, 1.012, 0, 0, 0}; // home posisiton
-double offset[8]; // L0, from "zero posi1tion", will be updated by "set home" command
-double in1[6] = {2.211, -3.482, 1.012, 0, 0, 0};
-double out1[8] = {2.87451, 2.59438, 2.70184, 2.40053, 2.46908, 2.15523, 2.65123, 2.35983}; // assume there are 8 motors
+double offset[12]; // L0, from "zero posi1tion", will be updated by "set home" command
+double railOffset = 0; // linear rails offset
+double in1[6] = {2.211, -3.482, 0.1, 0, 0, 0};
+double out1[12] = {2.87451, 2.59438, 2.70184, 2.40053, 2.46908, 2.15523, 2.65123, 2.35983, 0, 0, 0, 0}; // assume there are 8 motors + 4 linear rails
 double a[6], b[6], c[6], d[6], e[6], f[6], g[6], tb[6]; // trajectory coefficients
 
 dynamixel::PortHandler *portHandler;
@@ -76,17 +74,26 @@ int main()
             cin >> cmd;
             switch (cmd){
                 case 'i':   // Show menu
+                    // cout << "Break setting: " << myPort.BrakeControl.BrakeSetting(0) << endl;
+                    // myPort.Nodes(0).Status.RT.AutoRefresh(true);
+                    // while(!kbhit()){
+                    //     auto var = myPort.Nodes(0).Status.RT.Value().cpm.InA;
+                    //     cout << "Reading from input A: " << var;
+                    //     auto varB = myPort.Nodes(0).Status.RT.Value().cpm.InB;
+                    //     cout << "\tReading from input B: " << varB << endl;
+                    //     Sleep(200);
+                    // }
                     cout << "Pick from menu for the next action:\nt - Tighten cables with Torque mode\ny - Loose the cables\ns - Set current position as home\nh - Move to Home\n8 - Manually adjust cable lengths\nu - Update current position from external file\ni - Info: show menu\nn - Move on to Next step\n";
                     break;
                 case 'y':   // Loosen cables using positive torque
                     targetTorque = 1;
-                case 't':   // Tighten cables according to torque
+                case 't':   // Tighten cables according to torque **Only for 8 motors
                     cout << "Current target torque = " << targetTorque << endl;
                     for(INode* n : nodeList){ n->Motion.AccLimit = 200; }
                     while(!stabilized) {
                         SendMotorGrp(true);
                         Sleep(50);
-                        for (int n = 0; n < nodeList.size(); n++){
+                        for (int n = 0; n < NodeNum; n++){
                             if(nodeList[n]->Motion.TrqCommanded.Value() > targetTorque) { break; }
                             stabilized = true;
                         }
@@ -101,14 +108,23 @@ int main()
                     targetTorque = -2.5;
                     break;
                 case 's':   // Set zero
-                    for (int n = 0; n < nodeList.size(); n++){
+                    for (int n = 0; n < NodeNum; n++){
                         nodeList[n]->Motion.AddToPosition(-nodeList[n]->Motion.PosnMeasured.Value()); // Zeroing the number space around the current Measured Position
                     }
                     copy(begin(home), end(home), begin(in1)); // copy home array into input array
                     cout << "Setting zero completed" << endl;
                     cout <<  "Home coordinates: " << in1[0] << ", " << in1[1] << ", " << in1[2] << ", " << in1[3] << ", " << in1[4] << ", " << in1[5] << endl;
+
+                    cout << "Do you want to set current rail position as zero? (k - OK)\n";;
+                    cin >> cmd;
+                    if(cmd == 'k'){
+                        for (int n = NodeNum; n < NodeNum+4; n++){
+                            nodeList[n]->Motion.AddToPosition(-nodeList[n]->Motion.PosnMeasured.Value());
+                        }
+                        cout << "Linear rails are set to zero.\n";
+                    }
                     break;
-                case 'h':   // Homing
+                case 'h':   // Homing for all motors!! Including linear rail
                     allDone = false;
                     for (int n = 0; n<myPort.NodeCount(); n++) { 
                         nodeList[n]->Motion.MoveWentDone();
@@ -126,7 +142,7 @@ int main()
                     cout << "0 to 7 - motor id to adjust cable length\na or d - increase or decrease cable length\nb - Back to previous menu\n";
                     while(cmd != 'b'){
                         cin >> cmd;
-                        if('/' < cmd && cmd < nodeList.size()+48){
+                        if('/' < cmd && cmd < NodeNum + 49){
                             int id = cmd - 48;
                             int sCount = ToMotorCmd(-1, step) / 5;
                             cout << "Motor "<< cmd <<" selected.\n";
@@ -134,16 +150,27 @@ int main()
                                 cmd = getch();
                                 switch(cmd){
                                     case 'a':
-                                        nodeList[id]->Motion.MovePosnStart(sCount);
+                                        if(id = NodeNum){ for(int n = NodeNum; n<NodeNum+4; n++){ nodeList[n]->Motion.MovePosnStart(sCount); }}
+                                        else { nodeList[id]->Motion.MovePosnStart(sCount); }
                                         break;
                                     case 'd':
-                                        nodeList[id]->Motion.MovePosnStart(-sCount);
+                                        if(id = NodeNum){ for(int n = NodeNum; n<NodeNum+4; n++){ nodeList[n]->Motion.MovePosnStart(sCount); }}
+                                        else { nodeList[id]->Motion.MovePosnStart(-sCount); }
                                         break;
                                     case 'i':
-                                        nodeList[id]->Motion.PosnMeasured.Refresh();
-                                        cout << (double) nodeList[id]->Motion.PosnMeasured << endl;
+                                        if(id = NodeNum){
+                                            for(int n = NodeNum; n<NodeNum+4; n++){
+                                                nodeList[n]->Motion.PosnMeasured.Refresh();
+                                                cout << (double) nodeList[n]->Motion.PosnMeasured << endl;
+                                            }
+                                        }
+                                        else{
+                                            nodeList[id]->Motion.PosnMeasured.Refresh();
+                                            cout << (double) nodeList[id]->Motion.PosnMeasured << endl;
+                                        }
                                         break;
                                     case 'h':
+                                        if(id = NodeNum){ cout << "Homing for linear rails are not implemented here.\n"; break; }
                                         nodeList[id]->Motion.VelLimit = 300;
                                         nodeList[id]->Motion.MoveWentDone();
                                         nodeList[id]->Motion.MovePosnStart(0, true);
@@ -169,12 +196,16 @@ int main()
                                 // home[count++] = stod(temp); // convert string to double stod()
                                 in1[count++] = stod(temp); // convert string to double stod()
                             }
-                            cout << "Completed updating from external Current Pose file" << endl; //"Completed updating from external pose file"
+                            cout << "Completed reading from external Current Pose file" << endl; //"Completed updating from external pose file"
                         }
                         catch(int e){ cout << "Check if home.csv matches the home input no." << endl; }
+                        do{
+                            cout << "Current linear rail offset: ";
+                            cin >> railOffset; // do we need other constraits? ie 0 <= railOffset < 2
+                        }while(!cin.good() || railOffset>2);
                         
-                        pose_to_length(in1, out1);
-                        for (int n = 0; n < nodeList.size(); n++){
+                        pose_to_length(in1, out1, railOffset);
+                        for (int n = 0; n < NodeNum; n++){
                             int32_t step = ToMotorCmd(n, out1[n]);
                             nodeList[n]->Motion.PosnMeasured.Refresh();
                             nodeList[n]->Motion.AddToPosition(-nodeList[n]->Motion.PosnMeasured.Value() + step);
@@ -182,11 +213,12 @@ int main()
                         cout << "Updating motor counts completed" << endl;
                         cout << "Current coordinates: " << in1[0] << ", " << in1[1] << ", " << in1[2] << ", " << in1[3] << ", " << in1[4] << ", " << in1[5] << endl;
                         cout << "Motor internal counts: ";
-                        for (int id = 0; id < 8; id++){
+                        for (int id = 0; id < NodeNum; id++){
                             nodeList[id]->Motion.PosnMeasured.Refresh();
                             cout << (double) nodeList[id]->Motion.PosnMeasured << "\t";
                         }
                         cout << endl;
+                        cout << "Linear rail offset: " << railOffset << endl;
                     }
                     break;
                 
@@ -205,7 +237,7 @@ int main()
     packetHandler = dynamixel::PacketHandler::getPacketHandler(2.0);
     dynamixel::GroupSyncRead groupSyncRead(portHandler, packetHandler, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION);
     // dynamixel::GroupSyncWrite groupSyncWrite(portHandler, packetHandler, ADDR_GOAL_POSITION, LEN_GOAL_POSITION);       
-    {    // Open port
+    {    // Open dynamixel port
         if (portHandler->openPort()) { cout << "Succeeded to open Dynamixel port\n"; }
         else { cout << "Failed to open the port!\nPress any key to terminate...\n"; getch(); return -1; }
         // Set port baudrate
@@ -247,7 +279,7 @@ int main()
             case 'i':    // Show menu
                 cout << "Choose from menu for cable robot motion:\nt - Read from \"bricks.csv\" file for brick positions\nm - Manual input using w,a,s,d,r,f\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
                 break;
-            case 't':   // Read traj file
+            case 't':   // Read brick file, plan trajectory
             case 'T':
                 // Read input file for traj-gen
                 brickPos.clear();
@@ -333,7 +365,7 @@ int main()
                     }
                     cout << "IN: "<< in1[0] << " " << in1[1] << " " << in1[2] << " " << in1[3] << " " << in1[4] << " " << in1[5] << endl;
                     if(CheckLimits()){
-                        pose_to_length(in1, out1);
+                        pose_to_length(in1, out1, railOffset);
                         cout << "OUT: "<<  out1[0] << " " << out1[1] << " " << out1[2] << " " << out1[3] << " " <<  out1[4] << " " << out1[5] << " " << out1[6] << " " << out1[7] << endl;
                         
                         SendMotorGrp();
@@ -383,7 +415,7 @@ int main()
     
     //// Reverse motion??
 
-    // Safe system shut down and emegency shut down
+    //// Safe system shut down, safe last pos and emegency shut down
 
     //// List of what-if-s??
 
@@ -405,7 +437,7 @@ int main()
 }
 
 int CheckMotorNetwork() {
-    /*SysManager* myMgr = SysManager::Instance();
+    SysManager* myMgr = SysManager::Instance();
 
     sFnd::SysManager::FindComHubPorts(comHubPorts);
 
@@ -463,11 +495,54 @@ int CheckMotorNetwork() {
                 }
             }
         }
-    }*/
+    }
     return 0;
 }
 
-int RunParaBlend(double point[7], bool showAttention){
+int RaiseRailTo(double target){ // !!! Define velocity limit !!!
+    double velLmt = 0.1; // meters per sec
+    double dura = (target - railOffset)/velLmt*1000;// *1000 to change unit to ms
+    double a, b, c; // coefficients for cubic spline trajectory
+
+    // Solve coefficients of equations for cubic
+    a = railOffset;
+    b = 3 / (dura * dura) * (target - railOffset);
+    c = -2 / (dura * dura * dura) * (target - railOffset);
+    
+    // Run the trajectory till the given time is up
+    double t = 0;
+    char cmd;
+    auto start = chrono::steady_clock::now();
+    long dur = 0;
+    while (t <= dura){        
+        // CUBIC equation, per time step pose
+        railOffset = a + b * t * t + c * t * t * t; // update new rail offset
+
+        // get absolute cable lengths and rail positions in meters
+        pose_to_length(in1, out1, railOffset);
+        cout << "OUT: "<<  out1[4] << "\t" << out1[5] << "\t" << out1[6] << "\t" << out1[7] << "\t" <<  out1[8] << "\t" << out1[9] << "\t" << out1[10] << "\t" << out1[11] << endl;
+
+        SendMotorGrp(false, true);
+
+        dur = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now()-start).count(); // TODO: check if this time code works??
+        double dif = MILLIS_TO_NEXT_FRAME - dur - 1;
+        if(dif > 0) { Sleep(dif);}
+        t += MILLIS_TO_NEXT_FRAME;
+        start = chrono::steady_clock::now(); // refresh the ending time in loop
+
+        if(kbhit()){ // Emergency quit during trajectory control
+            cout << "\nSystem interrupted!! Do you want to quit the trajectory control?\nq - Quit trajectory\nr - Resume trajectory\n";
+            cin >> cmd;
+            if(cmd == 'q' || cmd == 'Q'){
+                cout << "Trajectory emergency quit\n";
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+int RunParaBlend(double point[7], bool showAttention = false){
     // make them accessable from outside??
     float vMax[6] = {.4, .4, .4, 0.8, 0.8, 0.8}; // m/s, define the maximum velocity for each DoF
     float aMax[6] = {50, 50, 50, 10, 10, 10}; // m/s^2, define the maximum acceleration for each DoF
@@ -529,7 +604,7 @@ int RunParaBlend(double point[7], bool showAttention){
         }
         // get absolute cable lengths in meters
         cout << "IN: "<< in1[0] << " " << in1[1] << " " << in1[2] << " " << in1[3] << " " << in1[4] << " " << in1[5] << endl;
-        pose_to_length(in1, out1);
+        pose_to_length(in1, out1, railOffset);
         cout << "OUT: "<<  out1[0] << "\t" << out1[1] << "\t" << out1[2] << "\t" << out1[3] << "\t" <<  out1[4] << "\t" << out1[5] << "\t" << out1[6] << "\t" << out1[7] << endl;
 
         SendMotorGrp();
@@ -560,10 +635,17 @@ void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead){
     double velLmt = 0.15; // meters per second
     double safeT = 1500; // in ms, time to raise to safety height
     double safeH = 0.06; // meter, safety height from building brick level
+    double currentBrkLvl = 0; // meter, current brick level
     double dura = 0;
     
     // Go through the given bricks
     for (int i = 0; i < brickPos.size(); i++) {
+        // Check if rails need to be raised
+        if(brickPos[i][2] != currentBrkLvl){
+            currentBrkLvl = brickPos[i][2]; // do we need any sort of offset from building levei??
+            if(RaiseRailTo(currentBrkLvl) < 0) { cout << "Trajectory aborted.\n"; return; } // raise rail to the building brick level
+        }
+
         // Go pick up a brick
         if(packetHandler->write4ByteTxRx(portHandler, DXL1_ID, ADDR_GOAL_POSITION, neutralRot, &dxl_error)){ cout << "Error in rotating gripper\n"; return; }
         Sleep(10); // short break between RS-485 communication
@@ -617,14 +699,18 @@ void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead){
 
 int32_t ToMotorCmd(int motorID, double length){
     double scale = 820632.006; //814873.3086; // 6400 encoder count per revoltion, 40 times gearbox, 50mm spool radias. ie 6400*40/(2*pi*0.05) 
-    if (motorID == -1) { return length * scale; }
+    if(motorID >= NodeNum) {
+        scale = 115000; // scale for linear rail??
+        return length * scale;
+    }
+    else if(motorID == -1) { return length * scale; }
     return (length - offset[motorID]) * scale;
 }
 
 void SendMotorCmd(int n){
     // convert to absolute cable length command
     try{
-         int32_t step = ToMotorCmd(n, out1[n]);
+        int32_t step = ToMotorCmd(n, out1[n]);
         nodeList[n]->Motion.MoveWentDone();
         nodeList[n]->Motion.MovePosnStart(step, true, true); // absolute position
         nodeList[n]->Motion.Adv.TriggerGroup(1);
@@ -645,17 +731,18 @@ void SendMotorTrq(int n){
     printf("Node[%d], current torque: %f\n", n, currentTorque);
 }
 
-void SendMotorGrp(bool IsTorque){
+void SendMotorGrp(bool IsTorque, bool IsLinearRail){
     SysManager* myMgr = SysManager::Instance();
     IPort &myPort = myMgr->Ports(0);
     void (*func)(int){ SendMotorCmd };
     if(IsTorque){ func = SendMotorTrq; }
+    int n = IsLinearRail? 4 : 0; // offset in nodeList
     
-    thread nodeThreads[nodeNum];
-    for(int i = 0; i < nodeNum; i++){
-        nodeThreads[i] = thread((*func), i);
+    thread nodeThreads[NodeNum];
+    for(int i = 0; i < NodeNum; i++){
+        nodeThreads[i] = thread((*func), i + n); 
     }
-    for(int i = 0; i < nodeNum; i++){
+    for(int i = 0; i < NodeNum; i++){
         nodeThreads[i].join();
     }
     myPort.Adv.TriggerMovesInGroup(1);
@@ -683,7 +770,7 @@ void TrjHome(){// !!! Define the task space velocity limit for homing !!!
             in1[j] = a[j] + b[j] * t * t + c[j] * t * t * t;
         }
         cout << "IN: "<< in1[0] << " " << in1[1] << " " << in1[2] << " " << in1[3] << " " << in1[4] << " " << in1[5] << endl;
-        pose_to_length(in1, out1);
+        pose_to_length(in1, out1, railOffset);
         // cout << "OUT: "<<  out1[0] << " " << out1[1] << " " << out1[2] << " " << out1[3] << endl;
         
         SendMotorGrp();
