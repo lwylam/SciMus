@@ -33,7 +33,7 @@ double step = 0.01; // in meters, for manual control
 float targetTorque = -2.5; // in %, -ve for tension, also need to UPDATE in switch case 't'!!!!!!!!!
 const int MILLIS_TO_NEXT_FRAME = 35; // note the basic calculation time is abt 16ms
 double home[6] = {0.1, 0.2, 2, 0, 0, 0}; // home posisiton
-double offset[12]; // L0, from "zero posi1tion", will be updated by "set home" command
+double offset[12]; // L0, from "zero position", will be updated by "set home" command
 double railOffset = 0; // linear rails offset
 double in1[6] = {2.211, -3.482, 0.1, 0, 0, 0};
 double out1[12] = {2.87451, 2.59438, 2.70184, 2.40053, 2.46908, 2.15523, 2.65123, 2.35983, 0, 0, 0, 0}; // assume there are 8 motors + 4 linear rails
@@ -217,7 +217,7 @@ int main()
                         cout << "Updating motor counts completed" << endl;
                         cout << "Current coordinates: " << in1[0] << ", " << in1[1] << ", " << in1[2] << ", " << in1[3] << ", " << in1[4] << ", " << in1[5] << endl;
                         cout << "Motor internal counts: ";
-                        for (int id = 0; id < NodeNum; id++){
+                        for (int id = 0; id < nodeList.size(); id++){
                             nodeList[id]->Motion.PosnMeasured.Refresh();
                             cout << (double) nodeList[id]->Motion.PosnMeasured << "\t";
                         }
@@ -270,6 +270,8 @@ int main()
         // Add parameter storage for present position value
         if(!groupSyncRead.addParam(DXL1_ID)){ cout << DXL1_ID << " groupSyncRead addparam failed\n"; }
         if(!groupSyncRead.addParam(DXL2_ID)){ cout << DXL2_ID << " groupSyncRead addparam failed\n"; }
+
+        cout << endl;
     }
     
     //// Read input .txt file
@@ -386,8 +388,7 @@ int main()
                     cout << "IN: "<< in1[0] << " " << in1[1] << " " << in1[2] << " " << in1[3] << " " << in1[4] << " " << in1[5] << endl;
                     if(CheckLimits()){
                         pose_to_length(in1, out1, railOffset);
-                        cout << "OUT: "<<  out1[0] << " " << out1[1] << " " << out1[2] << " " << out1[3] << " " <<  out1[4] << " " << out1[5] << " " << out1[6] << " " << out1[7] << endl;
-                        
+                        cout << "OUT: "<<  out1[0] << " " << out1[1] << " " << out1[2] << " " << out1[3] << " " <<  out1[4] << " " << out1[5] << " " << out1[6] << " " << out1[7] << " " <<  out1[8] << " " << out1[9] << " " << out1[10] << " " << out1[11] << endl;
                         SendMotorGrp();
                         
                         Sleep(step*1000);
@@ -454,9 +455,8 @@ int main()
     }
     cout << "Dynamixel is closed correctly\n";
 
-    cout << nodeList.size() << endl;
     for(int i = 0; i < nodeList.size(); i++){ //Disable Nodes
-        myPort.Nodes(i).EnableReq(false);
+        nodeList[i]->EnableReq(false);
     }
     nodeList.clear();
     myMgr->PortsClose(); // Close down the ports
@@ -528,11 +528,11 @@ int CheckMotorNetwork() {
 }
 
 int RaiseRailTo(double target){ // !!! Define velocity limit !!!
-    cout << "\nATTENTION: Raise rail function is called.\n";
     double velLmt = 0.02; // meters per sec
-    double dura = (target - railOffset)/velLmt*1000;// *1000 to change unit to ms
+    double dura = abs(target - railOffset)/velLmt*1000;// *1000 to change unit to ms
     double a, b, c; // coefficients for cubic spline trajectory
-
+    cout << "\nATTENTION: Raise rail function is called. Estimated time: " << dura << "\n";
+    
     // Solve coefficients of equations for cubic
     a = railOffset;
     b = 3 / (dura * dura) * (target - railOffset);

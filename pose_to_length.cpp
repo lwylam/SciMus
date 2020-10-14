@@ -15,7 +15,7 @@ void pose_to_length(double pose[], double lengths[], double rail_offset){
     frmOut[1] << -0.175, 0.0795, 3.375;
     frmOut[2] << 3.287, -6.5255, 3.555;
     frmOut[3] << -0.6805, -6.4305, 3.610;
-    frmOut[4] << 2.614, 0.0325, 0.050 + rail_offset; //motors connected to linear rails
+    frmOut[4] << 2.614, 0.0325, 0.050 + rail_offset; //motors connected to linear rails, coordinates when rail offset is 0
     frmOut[5] << 0.000, 0.0325, 0.050 + rail_offset;
     frmOut[6] << 3.068, -6.5075, 0.088 + rail_offset;
     frmOut[7] << -0.553, -6.4445, 0.077 + rail_offset;
@@ -71,7 +71,7 @@ void pose_to_length(double pose[], double lengths[], double rail_offset){
         double l_arc = pRadius * acos(UVecCF.dot(UVecCA));
 
         ///// Sum the total cable length /////
-        lengths[i] = l_arc + (orA[i] - orB[i]).norm() - rail_offset;
+        lengths[i] = i < 4 ? l_arc + (orA[i] - orB[i]).norm() : l_arc + (orA[i] - orB[i]).norm() - rail_offset; // Need to subtract the rail offset for the bottom 4 motors 
     }
     lengths[CABLE_NUM] = lengths[CABLE_NUM+1] = lengths[CABLE_NUM+2] = lengths[CABLE_NUM+3] = rail_offset;
 }
