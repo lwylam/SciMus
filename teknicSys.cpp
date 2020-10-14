@@ -16,7 +16,7 @@ using namespace std;
 using namespace sFnd;
 
 int CheckMotorNetwork();
-void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead);
+void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention = false);
 void SendMotorGrp(bool IsTorque = false, bool IsLinearRail = false);
 int32_t ToMotorCmd(int motorID, double length);
 void TrjHome();
@@ -28,10 +28,11 @@ vector<vector<double>> brickPos;
 vector<double> spcLimit;
 unsigned int portCount;
 const int NodeNum = 8; // !!!!! IMPORTANT !!!!! Put in the number of motors before compiling the programme
+const double RAIL_UP = 2, RAIL_DOWN = 0; // Linear rail upper and lower bound
 double step = 0.01; // in meters, for manual control
 float targetTorque = -2.5; // in %, -ve for tension, also need to UPDATE in switch case 't'!!!!!!!!!
 const int MILLIS_TO_NEXT_FRAME = 35; // note the basic calculation time is abt 16ms
-double home[6] = {2.211, -3.482, 1.012, 0, 0, 0}; // home posisiton
+double home[6] = {0.1, 0.2, 2, 0, 0, 0}; // home posisiton
 double offset[12]; // L0, from "zero posi1tion", will be updated by "set home" command
 double railOffset = 0; // linear rails offset
 double in1[6] = {2.211, -3.482, 0.1, 0, 0, 0};
@@ -123,6 +124,7 @@ int main()
                         }
                         cout << "Linear rails are set to zero.\n";
                     }
+                    else{ cout << "Current rail position may not be at zero\n"; }
                     break;
                 case 'h':   // Homing for all motors!! Including linear rail
                     allDone = false;
@@ -136,10 +138,11 @@ int main()
                             allDone = true;
                         }
                     }
+                    copy(begin(home), end(home), begin(in1)); // copy home array into input array
                     cout << "Homing completed" << endl;
                     break;
                 case '8':   // Manual cable adjustment
-                    cout << "0 to 7 - motor id to adjust cable length\na or d - increase or decrease cable length\nb - Back to previous menu\n";
+                    cout << "0 to 7 - motor id to adjust cable length\n8 - move 4 linear rails together\na or d - increase or decrease cable length\nb - Back to previous menu\n";
                     while(cmd != 'b'){
                         cin >> cmd;
                         if('/' < cmd && cmd < NodeNum + 49){
@@ -150,19 +153,20 @@ int main()
                                 cmd = getch();
                                 switch(cmd){
                                     case 'a':
-                                        if(id = NodeNum){ for(int n = NodeNum; n<NodeNum+4; n++){ nodeList[n]->Motion.MovePosnStart(sCount); }}
+                                        if(id == NodeNum){ for(int n = NodeNum; n<NodeNum+4; n++){ nodeList[n]->Motion.MovePosnStart(sCount); }}
                                         else { nodeList[id]->Motion.MovePosnStart(sCount); }
                                         break;
                                     case 'd':
-                                        if(id = NodeNum){ for(int n = NodeNum; n<NodeNum+4; n++){ nodeList[n]->Motion.MovePosnStart(sCount); }}
+                                        if(id == NodeNum){ for(int n = NodeNum; n<NodeNum+4; n++){ nodeList[n]->Motion.MovePosnStart(-sCount); }}
                                         else { nodeList[id]->Motion.MovePosnStart(-sCount); }
                                         break;
                                     case 'i':
-                                        if(id = NodeNum){
+                                        if(id == NodeNum){
                                             for(int n = NodeNum; n<NodeNum+4; n++){
                                                 nodeList[n]->Motion.PosnMeasured.Refresh();
                                                 cout << (double) nodeList[n]->Motion.PosnMeasured << endl;
                                             }
+                                            cout << endl;
                                         }
                                         else{
                                             nodeList[id]->Motion.PosnMeasured.Refresh();
@@ -170,7 +174,7 @@ int main()
                                         }
                                         break;
                                     case 'h':
-                                        if(id = NodeNum){ cout << "Homing for linear rails are not implemented here.\n"; break; }
+                                        if(id == NodeNum){ cout << "Homing for linear rails are not implemented here.\n"; break; }
                                         nodeList[id]->Motion.VelLimit = 300;
                                         nodeList[id]->Motion.MoveWentDone();
                                         nodeList[id]->Motion.MovePosnStart(0, true);
@@ -233,7 +237,7 @@ int main()
     
     //// Initialize dynamexial gripper
     // Initialize PacketHandler and PacketHandler instance
-    portHandler = dynamixel::PortHandler::getPortHandler("COM9");
+    portHandler = dynamixel::PortHandler::getPortHandler("COM3");
     packetHandler = dynamixel::PacketHandler::getPacketHandler(2.0);
     dynamixel::GroupSyncRead groupSyncRead(portHandler, packetHandler, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION);
     // dynamixel::GroupSyncWrite groupSyncWrite(portHandler, packetHandler, ADDR_GOAL_POSITION, LEN_GOAL_POSITION);       
@@ -269,7 +273,7 @@ int main()
     }
     
     //// Read input .txt file
-    cout << "Choose from menu for cable robot motion:\nt - Read from \"bricks.csv\" file for brick positions\nm - Manual input using w,a,s,d,r,f\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
+    cout << "Choose from menu for cable robot motion:\nt - Read from \"bricks.csv\" file for brick positions\nm - Manual input using w,a,s,d,r,f,v,g\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
     do {
         cin >> cmd;
         ifstream file ("bricks.csv");
@@ -298,7 +302,7 @@ int main()
                     cout << "Failed to read input file. Exit programme." << endl;
                     return -1;
                 }
-                RunBricksTraj(groupSyncRead);
+                RunBricksTraj(groupSyncRead, true);
                 break;
             case 'm':   // Manual wasdrf
             case 'M':
@@ -347,6 +351,22 @@ int main()
                         case 'f':
                             in1[2] -= step;
                             break;
+                        case 'G':
+                        case 'g':
+                            railOffset += step/5;
+                            if(railOffset > RAIL_UP) { cout << "WARNING! Rail offset beyond upper bound!\n"; railOffset -= step/5; }
+                            cout << "Current rail offset: " << railOffset << endl;
+                            pose_to_length(in1, out1, railOffset);
+                            SendMotorGrp(false, true);
+                            continue;
+                        case 'V':
+                        case 'v':
+                            railOffset -= step/5;
+                            if(railOffset < RAIL_DOWN) { cout << "WARNING! Rail offset beyond lower bound!\n"; railOffset += step/5; }
+                            cout << "Current rail offset: " << railOffset << endl;
+                            pose_to_length(in1, out1, railOffset);
+                            SendMotorGrp(false, true);
+                            continue;
                         case 'H':
                         case 'h':
                             cout << "Homing...\n"; 
@@ -416,7 +436,8 @@ int main()
     //// Reverse motion??
 
     //// Safe system shut down, safe last pos and emegency shut down
-
+    
+    
     //// List of what-if-s??
 
     {   // Disable Dynamixel Torque
@@ -432,7 +453,14 @@ int main()
         portHandler->closePort();
     }
     cout << "Dynamixel is closed correctly\n";
-    
+
+    cout << nodeList.size() << endl;
+    for(int i = 0; i < nodeList.size(); i++){ //Disable Nodes
+        myPort.Nodes(i).EnableReq(false);
+    }
+    nodeList.clear();
+    myMgr->PortsClose(); // Close down the ports
+    cout << "Teknic motors are disabled\n";
     return 1;
 }
 
@@ -500,7 +528,8 @@ int CheckMotorNetwork() {
 }
 
 int RaiseRailTo(double target){ // !!! Define velocity limit !!!
-    double velLmt = 0.1; // meters per sec
+    cout << "\nATTENTION: Raise rail function is called.\n";
+    double velLmt = 0.02; // meters per sec
     double dura = (target - railOffset)/velLmt*1000;// *1000 to change unit to ms
     double a, b, c; // coefficients for cubic spline trajectory
 
@@ -548,6 +577,7 @@ int RunParaBlend(double point[7], bool showAttention = false){
     float aMax[6] = {50, 50, 50, 10, 10, 10}; // m/s^2, define the maximum acceleration for each DoF
     double sQ[6], Q[6], o[6];
     double dura = point[6];
+    cout << "Will run for " << dura << "ms...\n";
     
     // Solve parabolic blend coefficients for each DoF
     for(int i = 0; i < 6; i++){
@@ -603,9 +633,9 @@ int RunParaBlend(double point[7], bool showAttention = false){
             }
         }
         // get absolute cable lengths in meters
-        cout << "IN: "<< in1[0] << " " << in1[1] << " " << in1[2] << " " << in1[3] << " " << in1[4] << " " << in1[5] << endl;
+        // cout << "IN: "<< in1[0] << " " << in1[1] << " " << in1[2] << " " << in1[3] << " " << in1[4] << " " << in1[5] << endl;
         pose_to_length(in1, out1, railOffset);
-        cout << "OUT: "<<  out1[0] << "\t" << out1[1] << "\t" << out1[2] << "\t" << out1[3] << "\t" <<  out1[4] << "\t" << out1[5] << "\t" << out1[6] << "\t" << out1[7] << endl;
+        // cout << "OUT: "<<  out1[0] << "\t" << out1[1] << "\t" << out1[2] << "\t" << out1[3] << "\t" <<  out1[4] << "\t" << out1[5] << "\t" << out1[6] << "\t" << out1[7] << endl;
 
         SendMotorGrp();
 
@@ -628,14 +658,14 @@ int RunParaBlend(double point[7], bool showAttention = false){
     return 0;
 }
 
-void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead){
-    double brickPickUp[7] = {0.1, 0.1, 2, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!
+void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention){
+    double brickPickUp[7] = {0.1, 0.1, 2, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!, the last digit is a dummy number for time duration.
     double safePt[3] = {0.2, 1, 2.1}; // a safe area near to the arm
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
-    double velLmt = 0.15; // meters per second
+    double velLmt = 0.25; // meters per second
     double safeT = 1500; // in ms, time to raise to safety height
     double safeH = 0.06; // meter, safety height from building brick level
-    double currentBrkLvl = 0; // meter, current brick level
+    double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as tageet BrkLvl??
     double dura = 0;
     
     // Go through the given bricks
@@ -647,11 +677,12 @@ void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead){
         }
 
         // Go pick up a brick
+        if(showAttention) { cout << "Picking up a brick\n"; }
         if(packetHandler->write4ByteTxRx(portHandler, DXL1_ID, ADDR_GOAL_POSITION, neutralRot, &dxl_error)){ cout << "Error in rotating gripper\n"; return; }
         Sleep(10); // short break between RS-485 communication
         if(packetHandler->write4ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_POSITION, gpOpen, &dxl_error)){ cout << "Error in opening gripper\n"; return; }
         brickPickUp[6] = sqrt(pow(brickPickUp[0]-in1[0],2)+pow(brickPickUp[1]-in1[1],2)+pow(brickPickUp[2]-in1[2],2))/velLmt*1000; // calculate time
-        if(RunParaBlend(brickPickUp, true) < 0) { cout << "Trajectory aborted.\n"; return; }
+        if(RunParaBlend(brickPickUp) < 0) { cout << "Trajectory aborted.\n"; return; }
         if(packetHandler->write4ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_POSITION, gpClose, &dxl_error)){ cout << "Error in closing gripper\n"; return; }
         do{ // wait till gripper is closed
             if(dxl_comm_result = groupSyncRead.txRxPacket()){ cout << "Comm error in reading packet: " << dxl_comm_result << endl; } 
@@ -662,36 +693,40 @@ void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead){
         }while((abs(neutralRot - dxl1Pos) > DXL_THRESHOLD) || (abs(gpClose - dxl2Pos) > DXL_THRESHOLD));
 
         // Go to building level
+        if(showAttention) { cout << "Going to building level\n"; }
         copy(brickPickUp, brickPickUp+2, begin(goalPos));
         goalPos[2] += 0.16;
         goalPos[6] = safeT;
-        if(RunParaBlend(goalPos, true) < 0) { cout << "Trajectory aborted.\n"; return; } // raise the brick from robot arm
+        if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; } // raise the brick from robot arm
         rotationG = brickPos[i][3] * 11.26666;; // conversion from angle to motor command
         if(packetHandler->write4ByteTxRx(portHandler, DXL1_ID, ADDR_GOAL_POSITION, rotationG, &dxl_error)){ cout << "Error in rotating gripper\n"; return; }
         copy(safePt, safePt+1, begin(goalPos)); // safe x,y position
         goalPos[2] = brickPos[i][2] + safeH; // brick level
         goalPos[6] = sqrt(pow(goalPos[0]-in1[0],2)+pow(goalPos[1]-in1[1],2)+pow(goalPos[2]-in1[2],2))/velLmt*1000;
-        if(RunParaBlend(goalPos, true) < 0) { cout << "Trajectory aborted.\n"; return; } // raise the brick to building level
+        if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; } // raise the brick to building level
 
         // Go to brick placing position
+        if(showAttention) { cout << "Going to brick position\n"; }
         goalPos[0] = brickPos[i][0];                       
         goalPos[1] = brickPos[i][1];
         goalPos[6] = sqrt(pow(goalPos[0]-in1[0],2)+pow(goalPos[1]-in1[1],2))/velLmt*1000;
-        if(RunParaBlend(goalPos, true) < 0) { cout << "Trajectory aborted.\n"; return; }
+        if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; }
 
         // Place brick
+        if(showAttention) { cout << "Placing brick\n"; }
         goalPos[2] -= safeH;
         goalPos[6] = safeT;
-        if(RunParaBlend(goalPos, true) < 0) { cout << "Trajectory aborted.\n"; return; }
+        if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; }
         if(packetHandler->write4ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_POSITION, gpOpen, &dxl_error)){ cout << "Error in opening gripper\n"; return; }
         
         // Rise and leave building area, stand by for next brick pick up
+        if(showAttention) { cout << "Going to stand by position\n"; }
         goalPos[2] += safeH;
-        if(RunParaBlend(goalPos, true) < 0) { cout << "Trajectory aborted.\n"; return; } // leave building level
+        if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; } // leave building level
         if(packetHandler->write4ByteTxRx(portHandler, DXL1_ID, ADDR_GOAL_POSITION, neutralRot, &dxl_error)){ cout << "Error in rotating gripper\n"; return; }
         copy(begin(safePt), end(safePt), begin(goalPos)); // safe x,y position
         goalPos[6] = sqrt(pow(goalPos[0]-in1[0],2)+pow(goalPos[1]-in1[1],2)+pow(goalPos[2]-in1[2],2))/velLmt*1000;
-        if(RunParaBlend(goalPos, true) < 0) { cout << "Trajectory aborted.\n"; return; } // return to safe point 
+        if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; } // return to safe point 
         
         cout << "----------Completed brick #" << i + 1 <<"----------" << endl;
     }
@@ -700,7 +735,7 @@ void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead){
 int32_t ToMotorCmd(int motorID, double length){
     double scale = 820632.006; //814873.3086; // 6400 encoder count per revoltion, 40 times gearbox, 50mm spool radias. ie 6400*40/(2*pi*0.05) 
     if(motorID >= NodeNum) {
-        scale = 115000; // scale for linear rail??
+        scale = 3840000; // 38400000; // 6400 encoder count per revoltion, 30 times gearbox, linear rail pitch 5mm. ie 6400*30/0.005 
         return length * scale;
     }
     else if(motorID == -1) { return length * scale; }
