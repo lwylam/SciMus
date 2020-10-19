@@ -21,6 +21,7 @@ void SendMotorGrp(bool IsTorque = false, bool IsLinearRail = false);
 int32_t ToMotorCmd(int motorID, double length);
 void TrjHome();
 bool CheckLimits();
+void MN_DECL AttentionDetected(const mnAttnReqReg &detected);
 
 vector<string> comHubPorts;
 vector<INode*> nodeList; // create a list for each node
@@ -128,7 +129,7 @@ int main()
                     break;
                 case 'h':   // Homing for all motors!! Including linear rail
                     allDone = false;
-                    for (int n = 0; n<myPort.NodeCount(); n++) { 
+                    for (int n = 0; n<nodeList.size(); n++) { 
                         nodeList[n]->Motion.MoveWentDone();
                         nodeList[n]->Motion.MovePosnStart(0, true); // absolute position
                     }
@@ -437,7 +438,8 @@ int main()
     //// Reverse motion??
 
     //// Safe system shut down, safe last pos and emegency shut down
-    
+    cout << "Current in1: " << in1[0] << " " << in1[1] << " " << in1[2] << " " << in1[3] << " " << in1[4] << " " << in1[5] << endl;
+    cout << "Current railOffset: " << railOffset << endl << endl;
     
     //// List of what-if-s??
 
@@ -510,7 +512,7 @@ int CheckMotorNetwork() {
             theNode.Motion.NodeStopDecelLim = 5000;
             theNode.Motion.VelLimit = 3000;             //700 Set Velocity Limit (RPM)
             theNode.Info.Ex.Parameter(98, 1);           //enable interrupting move
-            cout << "AccLimit and VelLimit set" << endl;
+            cout << "AccLimit and VelLimit set." << endl;
 
             nodeList.push_back(&theNode);               // add node to list
 
@@ -522,6 +524,17 @@ int CheckMotorNetwork() {
                     return -2;
                 }
             }
+
+            if (i == 2) { // Set the Node's Attention Mask to generate attentions on "Enabled" on every linear rail nodes
+                attnReg attnReq;
+                attnReq.cpm.InA = 1;
+                attnReq.cpm.InB = 1;
+                theNode.Adv.Attn.Mask = attnReq;
+            }
+        }
+        if (i == 2){ // For linear rail port
+            myPort.Adv.Attn.Enable(true); // Enable the attentions for this port, ie Port#2 for linear rails
+            myPort.Adv.Attn.AttnHandler(AttentionDetected); // Register handler at the port level, just for illustrative purposes.
         }
     }
     return 0;
@@ -574,7 +587,7 @@ int RaiseRailTo(double target){ // !!! Define velocity limit !!!
 int RunParaBlend(double point[7], bool showAttention = false){
     // make them accessable from outside??
     float vMax[6] = {.4, .4, .4, 0.8, 0.8, 0.8}; // m/s, define the maximum velocity for each DoF
-    float aMax[6] = {50, 50, 50, 10, 10, 10}; // m/s^2, define the maximum acceleration for each DoF
+    float aMax[6] = {80, 80, 80, 10, 10, 10}; // m/s^2, define the maximum acceleration for each DoF
     double sQ[6], Q[6], o[6];
     double dura = point[6];
     cout << "Will run for " << dura << "ms...\n";
@@ -662,7 +675,7 @@ void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention){
     double brickPickUp[7] = {0.1, 0.1, 2, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!, the last digit is a dummy number for time duration.
     double safePt[3] = {0.2, 1, 2.1}; // a safe area near to the arm
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
-    double velLmt = 0.25; // meters per second
+    double velLmt = 0.30; // meters per second
     double safeT = 1500; // in ms, time to raise to safety height
     double safeH = 0.06; // meter, safety height from building brick level
     double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as tageet BrkLvl??
@@ -851,4 +864,16 @@ bool CheckLimits(){
         if(spcLimit[i*2]>in1[i] || in1[i]>spcLimit[i*2+1]){ return false; }
     }
     return true;
+}
+
+void MN_DECL AttentionDetected(const mnAttnReqReg &detected)
+{
+    // Make a local, non-const copy for printing purposes
+    mnAttnReqReg myAttns = detected;
+    // Create a buffer to hold the attentionReg information
+    char attnStringBuf[512];
+    // Load the buffer with the string representation of the attention information
+    myAttns.AttentionReg.StateStr(attnStringBuf, 512);
+    // Print it out to the console
+    printf("ATTENTION: port %d, node=%d, attn=%s\n", detected.MultiAddr >> 4, detected.MultiAddr, attnStringBuf);
 }
