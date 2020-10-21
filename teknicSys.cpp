@@ -21,13 +21,15 @@ void SendMotorGrp(bool IsTorque = false, bool IsLinearRail = false);
 int32_t ToMotorCmd(int motorID, double length);
 void TrjHome();
 bool CheckLimits();
-void MN_DECL AttentionDetected(const mnAttnReqReg &detected);
+void HomeLinearRail(int n);
+void MN_DECL AttentionDetected(const mnAttnReqReg &detected); // this is attention from teknic motors
 
 vector<string> comHubPorts;
 vector<INode*> nodeList; // create a list for each node
 vector<vector<double>> brickPos;
 vector<double> spcLimit;
 unsigned int portCount;
+char attnStringBuf[512]; // Create a buffer to hold the attentionReg information    
 const int NodeNum = 8; // !!!!! IMPORTANT !!!!! Put in the number of motors before compiling the programme
 const double RAIL_UP = 2, RAIL_DOWN = 0; // Linear rail upper and lower bound
 double step = 0.01; // in meters, for manual control
@@ -39,15 +41,17 @@ double railOffset = 0; // linear rails offset
 double in1[6] = {2.211, -3.482, 0.1, 0, 0, 0};
 double out1[12] = {2.87451, 2.59438, 2.70184, 2.40053, 2.46908, 2.15523, 2.65123, 2.35983, 0, 0, 0, 0}; // assume there are 8 motors + 4 linear rails
 double a[6], b[6], c[6], d[6], e[6], f[6], g[6], tb[6]; // trajectory coefficients
+char limitType = 'C'; // A for home, B for limits, C for default
 
 dynamixel::PortHandler *portHandler;
 dynamixel::PacketHandler *packetHandler;
 uint8_t dxl_error = 0; // Dynamixel error
-int32_t dxl1Pos = 0, dxl2Pos = 0, gpOpen = 800, gpClose = 1100, neutralRot = 2048; // define some position reading, and gripper commands
+int32_t dxl1Pos = 0, dxl2Pos = 0, gpOpen = 800, gpClose = 1300, neutralRot = 2048; // define some position reading, and gripper commands
 int dxl_comm_result, rotationG, gripperG;
 const int DXL1_ID = 10, DXL2_ID = 3; //dxl 1 is rotation motor, dxl 2 is gripper motor
 const int ADDR_TORQUE_ENABLE = 64, ADDR_GOAL_POSITION = 116, ADDR_PRESENT_POSITION = 132, ADDR_GOAL_CURRENT = 102, ADDR_PRESENT_CURRENT = 126; // Control table adresses
 const int LEN_GOAL_POSITION = 4, LEN_PRESENT_POSITION = 4, LEN_GOAL_CURRENT = 2, LEN_PRESENT_CURRENT = 2, DXL_THRESHOLD = 10;
+
 
 int main()
 {   
@@ -65,10 +69,10 @@ int main()
         printf("Caught error: addr=%d, err=0x%08x\nmsg=%s\n", theErr.TheAddr, theErr.ErrorCode, theErr.ErrorMsg);
         return -1;
     }
-    IPort &myPort = myMgr->Ports(0);
+    IPort &myPort = myMgr->Ports(2);
     pose_to_length(home, offset); // save offset values according to home pose
-    
-    cout << "Motor network available. Pick from menu for the next action:\nt - Tighten cables with Torque mode\ny - Loose the cables\ns - Set current position as home\nh - Move to Home\n8 - Manually adjust cable lengths\nu - Update current position from external file\ni - Info: show menu\nn - Move on to Next step" << endl;
+
+    cout << "Motor network available. Pick from menu for the next action:\nt - Tighten cables with Torque mode\ny - Loose the cables\ns - Set current position as home\nh - Move to Home\n8 - Manually adjust cable lengths\nl - Linear rails motions\nu - Update current position from external file\ni - Info: show menu\nn - Move on to Next step" << endl;
     char cmd;
     try{
         do {
@@ -76,16 +80,7 @@ int main()
             cin >> cmd;
             switch (cmd){
                 case 'i':   // Show menu
-                    // cout << "Break setting: " << myPort.BrakeControl.BrakeSetting(0) << endl;
-                    // myPort.Nodes(0).Status.RT.AutoRefresh(true);
-                    // while(!kbhit()){
-                    //     auto var = myPort.Nodes(0).Status.RT.Value().cpm.InA;
-                    //     cout << "Reading from input A: " << var;
-                    //     auto varB = myPort.Nodes(0).Status.RT.Value().cpm.InB;
-                    //     cout << "\tReading from input B: " << varB << endl;
-                    //     Sleep(200);
-                    // }
-                    cout << "Pick from menu for the next action:\nt - Tighten cables with Torque mode\ny - Loose the cables\ns - Set current position as home\nh - Move to Home\n8 - Manually adjust cable lengths\nu - Update current position from external file\ni - Info: show menu\nn - Move on to Next step\n";
+                    cout << "Pick from menu for the next action:\nt - Tighten cables with Torque mode\ny - Loose the cables\ns - Set current position as home\nh - Move to Home\n8 - Manually adjust cable lengths\nl - Linear rails motions\nu - Update current position from external file\ni - Info: show menu\nn - Move on to Next step\n";
                     break;
                 case 'y':   // Loosen cables using positive torque
                     targetTorque = 1;
@@ -191,6 +186,24 @@ int main()
                     }
                     cout << "Manual adjustment terminated" << endl;
                     break;
+                case 'l':   // Linear rail motions
+                    cout << "0 to 3 - home linear rail individually\n4 - home all 4 linear rails automatically\nb - Back to previous menu\nany other keys - stop the linear rail from current motion\n";
+                    while(cmd != 'b'){
+                        cin >> cmd;
+                        if('/' < cmd && cmd < 52){ // homing individually
+                            int id = cmd - 48;
+                            cout << "Homing linear rail #"<< cmd <<".\n";
+                            HomeLinearRail(id);
+                        }
+                        else if(cmd == 52){ // homing 4 all tgt
+                            for (int i = 0; i < 4 ; i++){
+                                HomeLinearRail(i);
+                            }
+                            cout << "All linear rails are homed.\n";
+                        }
+                    }
+                    cout << "Linear rail homing terminated\n";
+                    break; 
                 case 'u':   // Update in1[] and offset[] from csv file
                     ifstream file ("currentPos.csv");//ifstream file ("home.csv"); //
                     string temp;
@@ -237,8 +250,7 @@ int main()
     }
     
     //// Initialize dynamexial gripper
-    // Initialize PacketHandler and PacketHandler instance
-    portHandler = dynamixel::PortHandler::getPortHandler("COM3");
+    portHandler = dynamixel::PortHandler::getPortHandler("COM3"); // Initialize PacketHandler and PacketHandler instance
     packetHandler = dynamixel::PacketHandler::getPacketHandler(2.0);
     dynamixel::GroupSyncRead groupSyncRead(portHandler, packetHandler, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION);
     // dynamixel::GroupSyncWrite groupSyncWrite(portHandler, packetHandler, ADDR_GOAL_POSITION, LEN_GOAL_POSITION);       
@@ -530,6 +542,9 @@ int CheckMotorNetwork() {
                 attnReq.cpm.InA = 1;
                 attnReq.cpm.InB = 1;
                 theNode.Adv.Attn.Mask = attnReq;
+
+                theNode.Adv.Attn.ClearAttn(attnReq);
+                theNode.EnableReq(true);
             }
         }
         if (i == 2){ // For linear rail port
@@ -866,14 +881,55 @@ bool CheckLimits(){
     return true;
 }
 
+void HomeLinearRail(int n){
+    double velLmt = -2000; // IMPORTANT!!!!! Set the linear homing speed here!!
+    double hLmtOffset[4] = {-38400, -64000, -80000, -34000}; // Set offset from home switch to real "home" in motor counts units
+
+    SysManager* myMgr = SysManager::Instance();
+    INode &theNode = myMgr->Ports(2).Nodes(n);
+    theNode.Motion.VelocityReachedTarget();
+    theNode.Motion.MoveVelStart(velLmt);
+            
+    while(!kbhit()){
+        switch(limitType){
+        case 'A':
+            cout << "InA detected!\n";
+            theNode.Motion.MoveVelStart(0);
+            while(!theNode.Motion.VelocityAtTarget()){} // wait till motor stopped
+            theNode.Motion.AddToPosition(-theNode.Motion.PosnMeasured.Value()+hLmtOffset[n]); // Add offset here if applicable
+            cout << "Reached homed swtich.\n";
+            theNode.Motion.MovePosnStart(0, true);
+            while(!theNode.Motion.MoveIsDone()){}
+            cout << "Homing completed.\n";
+            limitType = 'C';
+            return;
+        case 'B':
+            cout << "InB detected!\n";
+            velLmt *= -1;
+            theNode.Motion.MoveVelStart(velLmt);
+            if (velLmt > 0) { // ie moving upwards
+                while(limitType != 'A') {} //wait till home switch is passed
+                Sleep(2000);
+                velLmt *= -1;
+                theNode.Motion.MoveVelStart(velLmt);
+                limitType = 'C'; // wait till the home is hit from upward side
+                break;
+            } // else, just break and wait till homed
+            break;
+        }
+    }
+    theNode.Motion.MoveVelStart(0);
+    cout << "Linear rail motion interrupted\n";
+}
+
 void MN_DECL AttentionDetected(const mnAttnReqReg &detected)
 {
     // Make a local, non-const copy for printing purposes
     mnAttnReqReg myAttns = detected;
-    // Create a buffer to hold the attentionReg information
-    char attnStringBuf[512];
     // Load the buffer with the string representation of the attention information
     myAttns.AttentionReg.StateStr(attnStringBuf, 512);
     // Print it out to the console
     printf("ATTENTION: port %d, node=%d, attn=%s\n", detected.MultiAddr >> 4, detected.MultiAddr, attnStringBuf);
+
+    limitType = attnStringBuf[strlen(attnStringBuf)-2];
 }
