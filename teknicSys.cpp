@@ -17,6 +17,7 @@ using namespace sFnd;
 
 int CheckMotorNetwork();
 void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention = false);
+void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention = false);
 void SendMotorGrp(bool IsTorque = false, bool IsLinearRail = false);
 int32_t ToMotorCmd(int motorID, double length);
 void TrjHome();
@@ -46,7 +47,7 @@ char limitType = 'C'; // A for home, B for limits, C for default
 dynamixel::PortHandler *portHandler;
 dynamixel::PacketHandler *packetHandler;
 uint8_t dxl_error = 0; // Dynamixel error
-int32_t dxl1Pos = 0, dxl2Pos = 0, gpOpen = 800, gpClose = 1300, neutralRot = 2048; // define some position reading, and gripper commands
+int32_t dxl1Pos = 0, dxl2Pos = 0, gpOpen = 800, gpClose = 1300, neutralRot = 1024; // define some position reading, and gripper commands. neutralRot is 90 deg
 int dxl_comm_result, rotationG, gripperG;
 const int DXL1_ID = 10, DXL2_ID = 3; //dxl 1 is rotation motor, dxl 2 is gripper motor
 const int ADDR_TORQUE_ENABLE = 64, ADDR_GOAL_POSITION = 116, ADDR_PRESENT_POSITION = 132, ADDR_GOAL_CURRENT = 102, ADDR_PRESENT_CURRENT = 126; // Control table adresses
@@ -448,17 +449,43 @@ int main()
                 }
                 cout << "Quit manual control\n";
                 break;
+            case 'l':   // Read brick file, loop through a set no. of bricks
+            case 'L':
+                int loopNum = 30; // Define the no. of bricks to loop here!!!
+                // Read input file for traj-gen
+                brickPos.clear();
+                if(file.is_open()){
+                    while (getline(file, line)){
+                        row.clear();
+                        stringstream s(line);
+                        while (s >> word){
+                            row.push_back(stod(word)); // convert string to double stod()
+                        }
+                        brickPos.push_back(row);
+                    }
+                    cout << "Completed reading brick position input file" << endl;
+                }
+                else{
+                    cout << "Failed to read input file. Please check \"bricks.csv\" file." << endl;
+                    continue;
+                }
+                cout << "Bricks to loop: " << loopNum << endl;
+                if(brickPos.size()<loopNum){ cout << "Warning! Defined brick file is not long enough for looping.\n"; break; }
+                brickPos.erase(brickPos.begin(), brickPos.end()-loopNum); // Only need the last elements
+                cout << brickPos.size() << endl;
+                while(cmd != 'f' && cmd != 'F'){ // if not running the final loop.....
+                    // always reverse from a complete built, then rebuild it
+                    ReverseBricksTraj(groupSyncRead, true);
+                    if(cmd == 'q' || cmd == 'Q'){ break; }
+                    RunBricksTraj(groupSyncRead, true);
+                    if(cmd == 'q' || cmd == 'Q'){ break; }
+                }
+                cout << "Quit looping trajectory.\n";
+                break;
         }
     } while(cmd != 'n'); 
 
-    //// Plan trajectory, include gripper motion
-
-
-    //// Run motion and loop, update progress .txt
     
-    
-    //// Reverse motion??
-
     //// Safe system shut down, safe last pos and emegency shut down
     // Saving last position before quiting programme
     cout << "Saving last position...\n";
@@ -607,7 +634,7 @@ int RaiseRailTo(double target){ // !!! Define velocity limit !!!
         start = chrono::steady_clock::now(); // refresh the ending time in loop
 
         if(kbhit()){ // Emergency quit during trajectory control
-            cout << "\nSystem interrupted!! Do you want to quit the trajectory control?\nq - Quit trajectory\nr - Resume trajectory\n";
+            cout << "\nSystem interrupted!! Do you want to quit the trajectory control?\nq - Quit trajectory\nf - Finish this loop of motion\nr - Resume trajectory\n";
             cin >> cmd;
             if(cmd == 'q' || cmd == 'Q'){
                 cout << "Trajectory emergency quit\n";
@@ -698,7 +725,7 @@ int RunParaBlend(double point[7], bool showAttention = false){
         t += MILLIS_TO_NEXT_FRAME;
 
         if(kbhit()){ // Emergency quit during trajectory control
-            cout << "\nSystem interrupted!! Do you want to quit the trajectory control?\nq - Quit trajectory\nr - Resume trajectory\n";
+            cout << "\nSystem interrupted!! Do you want to quit the trajectory control?\nq - Quit trajectoryF\nf - Finish this loop of motion\nr - Resume trajectory\n";
             cin >> cmd;
             if(cmd == 'q' || cmd == 'Q'){
                 cout << "Trajectory emergency quit\n";
@@ -715,7 +742,7 @@ int RunParaBlend(double point[7], bool showAttention = false){
 
 void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention){
     double brickPickUp[7] = {0.1, 0.1, 2, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!, the last digit is a dummy number for time duration.
-    double safePt[3] = {0.2, 1, 2.1}; // a safe area near to the arm
+    double safePt[3] = {0.2, 0.2, 2.1}; // a safe area near to the arm
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
     double velLmt = 0.30; // meters per second
     double safeT = 1500; // in ms, time to raise to safety height
@@ -784,6 +811,74 @@ void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention){
         if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; } // return to safe point 
         
         cout << "----------Completed brick #" << i + 1 <<"----------" << endl;
+    }
+}
+
+void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention){
+    double brickDropOff[7] = {0.1, 0.4, 2, 0, 0, 0, 10}; // !!!! Define the brick drop off point !!!!, the last digit is a dummy number for time duration.
+    double safePt[3] = {0.2, 0.4, 2}; // a safe area near the drop off
+    double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
+    double velLmt = 0.30; // meters per second
+    double safeT = 1500; // in ms, time to raise to safety height
+    double safeH = 0.06; // meter, safety height from building brick level
+    double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as tageet BrkLvl??
+    double dura = 0;
+    
+    // Go through the given bricks
+    for (int i = brickPos.size(); i > 0; --i) {
+        // Check if rails need to be raised
+        if(brickPos[i][2] != currentBrkLvl){
+            currentBrkLvl = brickPos[i][2]; // do we need any sort of offset from building levei??
+            if(RaiseRailTo(currentBrkLvl) < 0) { cout << "Trajectory aborted.\n"; return; } // raise rail to the building brick level
+        }
+
+        // Go to building level
+        if(showAttention) { cout << "Going to building level\n"; }
+        if(packetHandler->write4ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_POSITION, gpOpen, &dxl_error)){ cout << "Error in opening gripper\n"; return; }
+        copy(in1, in1+1, begin(goalPos));
+        goalPos[2] = brickPos[i][2] + safeH; // brick level
+        goalPos[6] = sqrt(pow(goalPos[2]-in1[2],2))/velLmt*1000; // calculate time
+        if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; } // raise from current pos to builing level
+        
+        // Go to brick placing position
+        if(showAttention) { cout << "Going to brick position\n"; }
+        goalPos[0] = brickPos[i][0];                       
+        goalPos[1] = brickPos[i][1];
+        goalPos[6] = sqrt(pow(goalPos[0]-in1[0],2)+pow(goalPos[1]-in1[1],2))/velLmt*1000;
+        if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; }
+        rotationG = brickPos[i][3] * 11.26666;; // conversion from angle to motor command
+        if(packetHandler->write4ByteTxRx(portHandler, DXL1_ID, ADDR_GOAL_POSITION, rotationG, &dxl_error)){ cout << "Error in rotating gripper\n"; return; }
+        
+        // Retrieve brick
+        if(showAttention) { cout << "Retrieving brick\n"; }
+        goalPos[2] -= safeH;
+        goalPos[6] = safeT;
+        if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; }
+        if(packetHandler->write4ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_POSITION, gpClose, &dxl_error)){ cout << "Error in closing gripper\n"; return; }
+        do{ // wait till gripper is closed
+            if(dxl_comm_result = groupSyncRead.txRxPacket()){ cout << "Comm error in reading packet: " << dxl_comm_result << endl; } 
+            // Get present position value
+            dxl1Pos = groupSyncRead.getData(DXL1_ID, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION);
+            dxl2Pos = groupSyncRead.getData(DXL2_ID, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION);
+            printf("[ID:%03d] PresPos:%03d\t[ID:%03d] PresPos:%03d\n", DXL1_ID, dxl1Pos, DXL2_ID, dxl2Pos);
+        }while((abs(neutralRot - dxl1Pos) > DXL_THRESHOLD) || (abs(gpClose - dxl2Pos) > DXL_THRESHOLD));
+
+        // Rise and leave building area, stand by for next brick pick up
+        if(showAttention) { cout << "Going to drop off position\n"; }
+        goalPos[2] += safeH;
+        if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; } // leave building level
+        if(packetHandler->write4ByteTxRx(portHandler, DXL1_ID, ADDR_GOAL_POSITION, neutralRot, &dxl_error)){ cout << "Error in rotating gripper\n"; return; }
+        copy(begin(safePt), end(safePt), begin(goalPos)); // safe x,y position
+        goalPos[6] = sqrt(pow(goalPos[0]-in1[0],2)+pow(goalPos[1]-in1[1],2)+pow(goalPos[2]-in1[2],2))/velLmt*1000;
+        if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; } // return to safe point 
+        
+        // Dropping off a brick
+        if(showAttention) { cout << "Dropping off the brick\n"; }
+        brickDropOff[6] = sqrt(pow(brickDropOff[0]-in1[0],2)+pow(brickDropOff[1]-in1[1],2)+pow(brickDropOff[2]-in1[2],2))/velLmt*1000; // calculate time
+        if(RunParaBlend(brickDropOff) < 0) { cout << "Trajectory aborted.\n"; return; }
+        if(packetHandler->write4ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_POSITION, gpOpen, &dxl_error)){ cout << "Error in opening gripper\n"; return; }
+        
+        cout << "----------Retrieved brick #" << i + 1 <<"----------" << endl;
     }
 }
 
