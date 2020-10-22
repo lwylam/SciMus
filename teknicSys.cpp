@@ -296,7 +296,7 @@ int main()
         string line, word, temp;
         switch (cmd){
             case 'i':    // Show menu
-                cout << "Choose from menu for cable robot motion:\nt - Read from \"bricks.csv\" file for brick positions\nm - Manual input using w,a,s,d,r,f\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
+                cout << "Choose from menu for cable robot motion:\nt - Read from \"bricks.csv\" file for brick positions\nm - Manual input using w,a,s,d,r,f,v,g\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
                 break;
             case 't':   // Read brick file, plan trajectory
             case 'T':
@@ -595,6 +595,10 @@ int RaiseRailTo(double target){ // !!! Define velocity limit !!!
                 return -1;
             }
         }
+        if(limitType != 'C'){
+            cout << "WARNING! Linear rail limits triggered. Please quit the programme and check the system.\n";
+            return -3;
+        }
     }
     return 0;
 }
@@ -681,6 +685,10 @@ int RunParaBlend(double point[7], bool showAttention = false){
                 cout << "Trajectory emergency quit\n";
                 return -2;
             }
+        }
+        if(limitType != 'C'){
+            cout << "WARNING! Linear rail limits triggered. Please quit the programme and check the system.\n";
+            return -3;
         }
     }
     return 0;
@@ -860,6 +868,10 @@ void TrjHome(){// !!! Define the task space velocity limit for homing !!!
                 break;
             }
         }
+        if(limitType != 'C'){
+            cout << "WARNING! Linear rail limits triggered. Please quit the programme and check the system.\n";
+            return;
+        }
     }
     cout << "Homing with trajectory completed\n";
 }
@@ -883,7 +895,7 @@ bool CheckLimits(){
 
 void HomeLinearRail(int n){
     double velLmt = -2000; // IMPORTANT!!!!! Set the linear homing speed here!!
-    double hLmtOffset[4] = {-38400, -64000, -80000, -34000}; // Set offset from home switch to real "home" in motor counts units
+    double hLmtOffset[4] = {-34000, -34000, -34000, -34000}; // Set offset from home switch to real "home" in motor counts units
 
     SysManager* myMgr = SysManager::Instance();
     INode &theNode = myMgr->Ports(2).Nodes(n);
