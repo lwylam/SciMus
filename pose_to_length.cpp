@@ -9,6 +9,7 @@ using namespace std;
 void pose_to_length(double pose[], double lengths[], double rail_offset){
 ////////////////////////////////// Define the cable robot parameters here !! //////////////////////////////////
     const int CABLE_NUM = 8;
+    const int direction[8] = {1,1,1,1,-1,-1,-1,-1};
 
     Vector3d frmOut[CABLE_NUM]; // coordinates of the attachment points on frame at the beginning
     frmOut[0] << 2.683, 0.0505, 3.372;
@@ -21,7 +22,7 @@ void pose_to_length(double pose[], double lengths[], double rail_offset){
     frmOut[7] << -0.553, -6.4445, 0.077 + rail_offset;
 
     Vector3d frmOutUnitV[CABLE_NUM]; // unit vectors/directions of the fixed cable attachments on frame
-    for(int i = 0; i < CABLE_NUM; i++){ frmOutUnitV[i] << 0, 0, 1; }
+    for(int i = 0; i < CABLE_NUM; i++){ frmOutUnitV[i] << 0, 0, direction[i]; }
 
     Vector3d endOut[CABLE_NUM]; // local coordinates of cable attachment points on end-effector, ie ^er_B
     endOut[0] << 0.071, 0.050, -0.225;
