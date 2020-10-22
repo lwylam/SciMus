@@ -397,6 +397,16 @@ int main()
                             cout << " Step size is now set to 0.01m.\n";
                             step = 0.01;
                             break;
+                        case 'C':
+                        case 'c':
+                            cout << "Are you sure to clear warnings from triggered linear rail limit switch? Type \"CLEAR\" to confirm.\n";
+                            {
+                                string reply;
+                                cin >> reply;
+                                if (reply == "CLEAR"){ limitType = 'C'; cout << "Warning dismissed.\n"; }
+                                else { cout << "Warning is not cleared.\n"; }
+                            }
+                            continue;
                     }
                     cout << "IN: "<< in1[0] << " " << in1[1] << " " << in1[2] << " " << in1[3] << " " << in1[4] << " " << in1[5] << endl;
                     if(CheckLimits()){
