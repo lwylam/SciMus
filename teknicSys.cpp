@@ -205,25 +205,25 @@ int main()
                     cout << "Linear rail homing terminated\n";
                     break; 
                 case 'u':   // Update in1[] and offset[] from csv file
-                    ifstream file ("currentPos.csv");//ifstream file ("home.csv"); //
+                    ifstream file ("lastPos.txt"); //"lastPos.txt" or "currentPos.csv"
                     string temp;
                     int count = 0;
                     if(file.is_open()){
                         try{
                             while (file >> temp){
-                                // home[count++] = stod(temp); // convert string to double stod()
+                                if(count > 5) { railOffset = stod(temp); break; } // reading the rail offset, then break while loop
                                 in1[count++] = stod(temp); // convert string to double stod()
                             }
-                            cout << "Completed reading from external Current Pose file" << endl; //"Completed updating from external pose file"
+                            cout << "Completed reading from external file" << endl; //"Completed updating from external pose file"
                         }
-                        catch(int e){ cout << "Check if home.csv matches the home input no." << endl; }
-                        do{
-                            cout << "Current linear rail offset: ";
-                            cin >> railOffset; // do we need other constraits? ie 0 <= railOffset < 2
-                        }while(!cin.good() || railOffset>2);
+                        catch(int e){ cout << "Check if currentPos.csv matches the in1 input no." << endl; }
+                        // do{
+                        //     cout << "Current linear rail offset: ";
+                        //     cin >> railOffset; // do we need other constraits? ie 0 <= railOffset < 2
+                        // }while(!cin.good() || railOffset>2);
                         
                         pose_to_length(in1, out1, railOffset);
-                        for (int n = 0; n < NodeNum; n++){
+                        for (int n = 0; n < nodeList.size(); n++){
                             int32_t step = ToMotorCmd(n, out1[n]);
                             nodeList[n]->Motion.PosnMeasured.Refresh();
                             nodeList[n]->Motion.AddToPosition(-nodeList[n]->Motion.PosnMeasured.Value() + step);
@@ -314,8 +314,8 @@ int main()
                     cout << "Completed reading brick position input file" << endl;
                 }
                 else{
-                    cout << "Failed to read input file. Exit programme." << endl;
-                    return -1;
+                    cout << "Failed to read input file. Please check \"bricks.csv\" file." << endl;
+                    continue;
                 }
                 RunBricksTraj(groupSyncRead, true);
                 break;
@@ -460,8 +460,17 @@ int main()
     //// Reverse motion??
 
     //// Safe system shut down, safe last pos and emegency shut down
-    cout << "Current in1: " << in1[0] << " " << in1[1] << " " << in1[2] << " " << in1[3] << " " << in1[4] << " " << in1[5] << endl;
-    cout << "Current railOffset: " << railOffset << endl << endl;
+    // Saving last position before quiting programme
+    cout << "Saving last position...\n";
+    ofstream myfile;
+    myfile.open ("lastPos.txt");
+    myfile << in1[0] << " " << in1[1] << " " << in1[2] << " " << in1[3] << " " << in1[4] << " " << in1[5] << endl;
+    myfile << railOffset << endl;
+    for(INode* n : nodeList){
+        n->Motion.PosnMeasured.Refresh();
+        myfile << n->Motion.PosnMeasured.Value() << " ";
+    }
+    myfile.close();
     
     //// List of what-if-s??
 
@@ -778,7 +787,7 @@ void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention){
     }
 }
 
-int32_t ToMotorCmd(int motorID, double length){
+int32_t ToMotorCmd(int motorID, double length){ // applicable for all 12 motors
     double scale = 820632.006; //814873.3086; // 6400 encoder count per revoltion, 40 times gearbox, 50mm spool radias. ie 6400*40/(2*pi*0.05) 
     if(motorID >= NodeNum) {
         scale = 3840000; // 38400000; // 6400 encoder count per revoltion, 30 times gearbox, linear rail pitch 5mm. ie 6400*30/0.005 
