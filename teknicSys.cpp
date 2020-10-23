@@ -43,13 +43,14 @@ double in1[6] = {2.211, -3.482, 0.1, 0, 0, 0};
 double out1[12] = {2.87451, 2.59438, 2.70184, 2.40053, 2.46908, 2.15523, 2.65123, 2.35983, 0, 0, 0, 0}; // assume there are 8 motors + 4 linear rails
 double a[6], b[6], c[6], d[6], e[6], f[6], g[6], tb[6]; // trajectory coefficients
 char limitType = 'C'; // A for home, B for limits, C for default
+char quitType = 'r'; // q for emergency quit, f for finish traj, r for resume/default
 
 dynamixel::PortHandler *portHandler;
 dynamixel::PacketHandler *packetHandler;
 uint8_t dxl_error = 0; // Dynamixel error
 int32_t dxl1Pos = 0, dxl2Pos = 0, gpOpen = 800, gpClose = 1300, neutralRot = 1024; // define some position reading, and gripper commands. neutralRot is 90 deg
 int dxl_comm_result, rotationG, gripperG;
-const int DXL1_ID = 10, DXL2_ID = 3; //dxl 1 is rotation motor, dxl 2 is gripper motor
+const int DXL1_ID = 1, DXL2_ID = 2; //dxl 1 is rotation motor, dxl 2 is gripper motor
 const int ADDR_TORQUE_ENABLE = 64, ADDR_GOAL_POSITION = 116, ADDR_PRESENT_POSITION = 132, ADDR_GOAL_CURRENT = 102, ADDR_PRESENT_CURRENT = 126; // Control table adresses
 const int LEN_GOAL_POSITION = 4, LEN_PRESENT_POSITION = 4, LEN_GOAL_CURRENT = 2, LEN_PRESENT_CURRENT = 2, DXL_THRESHOLD = 10;
 
@@ -289,7 +290,7 @@ int main()
     }
     
     //// Read input .txt file
-    cout << "Choose from menu for cable robot motion:\nt - Read from \"bricks.csv\" file for brick positions\nm - Manual input using w,a,s,d,r,f,v,g\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
+    cout << "Choose from menu for cable robot motion:\nt - Read from \"bricks.csv\" file for brick positions\nl - Loop through set num of bricks\nm - Manual input using w,a,s,d,r,f,v,g\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
     do {
         cin >> cmd;
         ifstream file ("bricks.csv");
@@ -297,7 +298,7 @@ int main()
         string line, word, temp;
         switch (cmd){
             case 'i':    // Show menu
-                cout << "Choose from menu for cable robot motion:\nt - Read from \"bricks.csv\" file for brick positions\nm - Manual input using w,a,s,d,r,f,v,g\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
+                cout << "Choose from menu for cable robot motion:\nt - Read from \"bricks.csv\" file for brick positions\nl - Loop through set num of bricks\nm - Manual input using w,a,s,d,r,f,v,g\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
                 break;
             case 't':   // Read brick file, plan trajectory
             case 'T':
@@ -453,6 +454,7 @@ int main()
             case 'L':
                 int loopNum = 30; // Define the no. of bricks to loop here!!!
                 // Read input file for traj-gen
+                quitType = 'r';
                 brickPos.clear();
                 if(file.is_open()){
                     while (getline(file, line)){
@@ -465,25 +467,22 @@ int main()
                     }
                     cout << "Completed reading brick position input file" << endl;
                 }
-                else{
-                    cout << "Failed to read input file. Please check \"bricks.csv\" file." << endl;
-                    continue;
-                }
+                else{ cout << "Failed to read input file. Please check \"bricks.csv\" file." << endl; continue; }
                 cout << "Bricks to loop: " << loopNum << endl;
                 if(brickPos.size()<loopNum){ cout << "Warning! Defined brick file is not long enough for looping.\n"; break; }
                 brickPos.erase(brickPos.begin(), brickPos.end()-loopNum); // Only need the last elements
                 cout << brickPos.size() << endl;
-                while(cmd != 'f' && cmd != 'F'){ // if not running the final loop.....
+                while(quitType != 'f' && quitType != 'F'){ // if not running the final loop.....
                     // always reverse from a complete built, then rebuild it
                     ReverseBricksTraj(groupSyncRead, true);
-                    if(cmd == 'q' || cmd == 'Q'){ break; }
+                    if(quitType == 'q' || quitType == 'Q'){ break; }
                     RunBricksTraj(groupSyncRead, true);
-                    if(cmd == 'q' || cmd == 'Q'){ break; }
+                    if(quitType == 'q' || quitType == 'Q'){ break; }
                 }
                 cout << "Quit looping trajectory.\n";
                 break;
         }
-    } while(cmd != 'n'); 
+    } while(cmd != 'n');
 
     
     //// Safe system shut down, safe last pos and emegency shut down
@@ -614,7 +613,6 @@ int RaiseRailTo(double target){ // !!! Define velocity limit !!!
     
     // Run the trajectory till the given time is up
     double t = 0;
-    char cmd;
     auto start = chrono::steady_clock::now();
     long dur = 0;
     while (t <= dura){        
@@ -635,8 +633,8 @@ int RaiseRailTo(double target){ // !!! Define velocity limit !!!
 
         if(kbhit()){ // Emergency quit during trajectory control
             cout << "\nSystem interrupted!! Do you want to quit the trajectory control?\nq - Quit trajectory\nf - Finish this loop of motion\nr - Resume trajectory\n";
-            cin >> cmd;
-            if(cmd == 'q' || cmd == 'Q'){
+            cin >> quitType;
+            if(quitType == 'q' || quitType == 'Q'){
                 cout << "Trajectory emergency quit\n";
                 return -1;
             }
@@ -693,7 +691,6 @@ int RunParaBlend(double point[7], bool showAttention = false){
     
     // Run the trajectory till the given time is up
     double t = 0;
-    char cmd;
     while (t <= point[6]){
         auto start = chrono::steady_clock::now();
         long dur = 0;
@@ -725,9 +722,9 @@ int RunParaBlend(double point[7], bool showAttention = false){
         t += MILLIS_TO_NEXT_FRAME;
 
         if(kbhit()){ // Emergency quit during trajectory control
-            cout << "\nSystem interrupted!! Do you want to quit the trajectory control?\nq - Quit trajectoryF\nf - Finish this loop of motion\nr - Resume trajectory\n";
-            cin >> cmd;
-            if(cmd == 'q' || cmd == 'Q'){
+            cout << "\nSystem interrupted!! Do you want to quit the trajectory control?\nq - Quit trajectory\nf - Finish this loop of motion\nr - Resume trajectory\n";
+            cin >> quitType;
+            if(quitType == 'q' || quitType == 'Q'){
                 cout << "Trajectory emergency quit\n";
                 return -2;
             }
@@ -825,7 +822,7 @@ void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttentio
     double dura = 0;
     
     // Go through the given bricks
-    for (int i = brickPos.size(); i > 0; --i) {
+    for (int i = brickPos.size()-1; i > -1; i--) {
         // Check if rails need to be raised
         if(brickPos[i][2] != currentBrkLvl){
             currentBrkLvl = brickPos[i][2]; // do we need any sort of offset from building levei??
@@ -861,7 +858,7 @@ void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttentio
             dxl1Pos = groupSyncRead.getData(DXL1_ID, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION);
             dxl2Pos = groupSyncRead.getData(DXL2_ID, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION);
             printf("[ID:%03d] PresPos:%03d\t[ID:%03d] PresPos:%03d\n", DXL1_ID, dxl1Pos, DXL2_ID, dxl2Pos);
-        }while((abs(neutralRot - dxl1Pos) > DXL_THRESHOLD) || (abs(gpClose - dxl2Pos) > DXL_THRESHOLD));
+        }while((abs(gpClose - dxl2Pos) > DXL_THRESHOLD));
 
         // Rise and leave building area, stand by for next brick pick up
         if(showAttention) { cout << "Going to drop off position\n"; }
@@ -877,6 +874,7 @@ void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttentio
         brickDropOff[6] = sqrt(pow(brickDropOff[0]-in1[0],2)+pow(brickDropOff[1]-in1[1],2)+pow(brickDropOff[2]-in1[2],2))/velLmt*1000; // calculate time
         if(RunParaBlend(brickDropOff) < 0) { cout << "Trajectory aborted.\n"; return; }
         if(packetHandler->write4ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_POSITION, gpOpen, &dxl_error)){ cout << "Error in opening gripper\n"; return; }
+        Sleep(1000); // wait a little after dropping brick
         
         cout << "----------Retrieved brick #" << i + 1 <<"----------" << endl;
     }
