@@ -625,7 +625,7 @@ int RaiseRailTo(double target){ // !!! Define velocity limit !!!
 
         SendMotorGrp(false, true);
 
-        dur = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now()-start).count(); // TODO: check if this time code works??
+        dur = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now()-start).count();
         double dif = MILLIS_TO_NEXT_FRAME - dur - 1;
         if(dif > 0) { Sleep(dif);}
         t += MILLIS_TO_NEXT_FRAME;
@@ -648,7 +648,6 @@ int RaiseRailTo(double target){ // !!! Define velocity limit !!!
 }
 
 int RunParaBlend(double point[7], bool showAttention = false){
-    // make them accessable from outside??
     float vMax[6] = {.4, .4, .4, 0.8, 0.8, 0.8}; // m/s, define the maximum velocity for each DoF
     float aMax[6] = {80, 80, 80, 10, 10, 10}; // m/s^2, define the maximum acceleration for each DoF
     double sQ[6], Q[6], o[6];
@@ -744,7 +743,7 @@ void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention){
     double velLmt = 0.30; // meters per second
     double safeT = 1500; // in ms, time to raise to safety height
     double safeH = 0.06; // meter, safety height from building brick level
-    double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as tageet BrkLvl??
+    double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as target BrkLvl
     double dura = 0;
     
     // Go through the given bricks
@@ -818,7 +817,7 @@ void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttentio
     double velLmt = 0.30; // meters per second
     double safeT = 1500; // in ms, time to raise to safety height
     double safeH = 0.06; // meter, safety height from building brick level
-    double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as tageet BrkLvl??
+    double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as target BrkLvl
     double dura = 0;
     
     // Go through the given bricks
@@ -881,9 +880,9 @@ void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttentio
 }
 
 int32_t ToMotorCmd(int motorID, double length){ // applicable for all 12 motors
-    double scale = 820632.006; //814873.3086; // 6400 encoder count per revoltion, 40 times gearbox, 50mm spool radias. ie 6400*40/(2*pi*0.05) 
+    double scale = 509295.818; //509295.818; // 6400 encoder count per revoltion, 25 times gearbox, 50mm spool radias. ie 6400*25/(2*pi*0.05) 
     if(motorID >= NodeNum) {
-        scale = 3840000; // 38400000; // 6400 encoder count per revoltion, 30 times gearbox, linear rail pitch 5mm. ie 6400*30/0.005 
+        scale = 38400000; // 38400000; // 6400 encoder count per revoltion, 30 times gearbox, linear rail pitch 5mm. ie 6400*30/0.005 
         return length * scale;
     }
     else if(motorID == -1) { return length * scale; }
