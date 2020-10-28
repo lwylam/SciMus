@@ -21,6 +21,7 @@ void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttentio
 void SendMotorGrp(bool IsTorque = false, bool IsLinearRail = false);
 int32_t ToMotorCmd(int motorID, double length);
 void TrjHome();
+bool ReadBricksFile();
 bool CheckLimits();
 void HomeLinearRail(int n);
 void MN_DECL AttentionDetected(const mnAttnReqReg &detected); // this is attention from teknic motors
@@ -293,32 +294,13 @@ int main()
     cout << "Choose from menu for cable robot motion:\nt - Read from \"bricks.csv\" file for brick positions\nl - Loop through set num of bricks\nm - Manual input using w,a,s,d,r,f,v,g\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
     do {
         cin >> cmd;
-        ifstream file ("bricks.csv");
-        vector<double> row;
-        string line, word, temp;
         switch (cmd){
             case 'i':    // Show menu
                 cout << "Choose from menu for cable robot motion:\nt - Read from \"bricks.csv\" file for brick positions\nl - Loop through set num of bricks\nm - Manual input using w,a,s,d,r,f,v,g\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
                 break;
             case 't':   // Read brick file, plan trajectory
             case 'T':
-                // Read input file for traj-gen
-                brickPos.clear();
-                if(file.is_open()){
-                    while (getline(file, line)){
-                        row.clear();
-                        stringstream s(line);
-                        while (s >> word){
-                            row.push_back(stod(word)); // convert string to double stod()
-                        }
-                        brickPos.push_back(row);
-                    }
-                    cout << "Completed reading brick position input file" << endl;
-                }
-                else{
-                    cout << "Failed to read input file. Please check \"bricks.csv\" file." << endl;
-                    continue;
-                }
+                if(!ReadBricksFile()){ continue; }
                 RunBricksTraj(groupSyncRead, true);
                 break;
             case 'm':   // Manual wasdrf
@@ -455,19 +437,7 @@ int main()
                 int loopNum = 30; // Define the no. of bricks to loop here!!!
                 // Read input file for traj-gen
                 quitType = 'r';
-                brickPos.clear();
-                if(file.is_open()){
-                    while (getline(file, line)){
-                        row.clear();
-                        stringstream s(line);
-                        while (s >> word){
-                            row.push_back(stod(word)); // convert string to double stod()
-                        }
-                        brickPos.push_back(row);
-                    }
-                    cout << "Completed reading brick position input file" << endl;
-                }
-                else{ cout << "Failed to read input file. Please check \"bricks.csv\" file." << endl; continue; }
+                if(!ReadBricksFile()){ continue; }
                 cout << "Bricks to loop: " << loopNum << endl;
                 if(brickPos.size()<loopNum){ cout << "Warning! Defined brick file is not long enough for looping.\n"; break; }
                 brickPos.erase(brickPos.begin(), brickPos.end()-loopNum); // Only need the last elements
@@ -625,7 +595,7 @@ int RaiseRailTo(double target){ // !!! Define velocity limit !!!
 
         SendMotorGrp(false, true);
 
-        dur = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now()-start).count(); // TODO: check if this time code works??
+        dur = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now()-start).count();
         double dif = MILLIS_TO_NEXT_FRAME - dur - 1;
         if(dif > 0) { Sleep(dif);}
         t += MILLIS_TO_NEXT_FRAME;
@@ -738,17 +708,19 @@ int RunParaBlend(double point[7], bool showAttention = false){
 }
 
 void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention){
+    IBrakeControl &ABB_signal = nodeList[0]->Port.BrakeControl; 
     double brickPickUp[7] = {0.1, 0.1, 2, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!, the last digit is a dummy number for time duration.
     double safePt[3] = {0.2, 0.2, 2.1}; // a safe area near to the arm
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
     double velLmt = 0.30; // meters per second
     double safeT = 1500; // in ms, time to raise to safety height
     double safeH = 0.06; // meter, safety height from building brick level
-    double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as tageet BrkLvl??
+    double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as target BrkLvl
     double dura = 0;
     
     // Go through the given bricks
     for (int i = 0; i < brickPos.size(); i++) {
+        ABB_signal.BrakeSetting(0, GPO_OFF); // Reset ABB gripper, do we need this??
         // Check if rails need to be raised
         if(brickPos[i][2] != currentBrkLvl){
             currentBrkLvl = brickPos[i][2]; // do we need any sort of offset from building levei??
@@ -770,8 +742,11 @@ void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention){
             dxl2Pos = groupSyncRead.getData(DXL2_ID, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION);
             printf("[ID:%03d] PresPos:%03d\t[ID:%03d] PresPos:%03d\n", DXL1_ID, dxl1Pos, DXL2_ID, dxl2Pos);
         }while((abs(neutralRot - dxl1Pos) > DXL_THRESHOLD) || (abs(gpClose - dxl2Pos) > DXL_THRESHOLD));
+        ABB_signal.BrakeSetting(0, GPO_ON); // send signal to release gripper on ABB
+        Sleep(500); // This is hard code, waiting for gripper release
 
         // Go to building level
+        ABB_signal.BrakeSetting(0, GPO_OFF); // Reset ABB gripper
         if(showAttention) { cout << "Going to building level\n"; }
         copy(brickPickUp, brickPickUp+2, begin(goalPos));
         goalPos[2] += 0.16;
@@ -818,7 +793,7 @@ void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttentio
     double velLmt = 0.30; // meters per second
     double safeT = 1500; // in ms, time to raise to safety height
     double safeH = 0.06; // meter, safety height from building brick level
-    double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as tageet BrkLvl??
+    double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as target BrkLvl
     double dura = 0;
     
     // Go through the given bricks
@@ -881,9 +856,9 @@ void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttentio
 }
 
 int32_t ToMotorCmd(int motorID, double length){ // applicable for all 12 motors
-    double scale = 820632.006; //814873.3086; // 6400 encoder count per revoltion, 40 times gearbox, 50mm spool radias. ie 6400*40/(2*pi*0.05) 
-    if(motorID >= NodeNum) {
-        scale = 3840000; // 38400000; // 6400 encoder count per revoltion, 30 times gearbox, linear rail pitch 5mm. ie 6400*30/0.005 
+    double scale = 509296.2486; //509296.248; // 6400 encoder count per revoltion, 25 times gearbox, 50mm spool radias. ie 6400*25/(2*pi*0.05) 
+    if(motorID >= NodeNum) { // For linear rail
+        scale = 38400000; // 38400000; // 6400 encoder count per revoltion, 30 times gearbox, linear rail pitch 5mm. ie 6400*30/0.005 
         return length * scale;
     }
     else if(motorID == -1) { return length * scale; }
@@ -891,9 +866,8 @@ int32_t ToMotorCmd(int motorID, double length){ // applicable for all 12 motors
 }
 
 void SendMotorCmd(int n){
-    // convert to absolute cable length command
     try{
-        int32_t step = ToMotorCmd(n, out1[n]);
+        int32_t step = ToMotorCmd(n, out1[n]); // convert to absolute cable length command
         nodeList[n]->Motion.MoveWentDone();
         nodeList[n]->Motion.MovePosnStart(step, true, true); // absolute position
         nodeList[n]->Motion.Adv.TriggerGroup(1);
@@ -986,6 +960,28 @@ void TrjHome(){// !!! Define the task space velocity limit for homing !!!
         }
     }
     cout << "Homing with trajectory completed\n";
+}
+
+bool ReadBricksFile(){
+    ifstream file ("bricks.csv");
+    vector<double> row;
+    string line, word, temp;
+
+    brickPos.clear();
+    if(file.is_open()){
+        while (getline(file, line)){
+            row.clear();
+            stringstream s(line);
+            while (s >> word){
+                row.push_back(stod(word)); // convert string to double stod()
+            }
+            for (int i = 0; i < 3; i++){ row[i] /= 1000; } // convert mm to m unit, for xyz only
+            brickPos.push_back(row);
+        }
+        cout << "Completed reading brick position input file" << endl;
+    }
+    else{ cout << "Failed to read input file. Please check \"bricks.csv\" file." << endl; return false; }
+    return true;
 }
 
 bool CheckLimits(){

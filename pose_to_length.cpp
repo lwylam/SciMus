@@ -25,14 +25,14 @@ void pose_to_length(double pose[], double lengths[], double rail_offset){
     for(int i = 0; i < CABLE_NUM; i++){ frmOutUnitV[i] << 0, 0, direction[i]; }
 
     Vector3d endOut[CABLE_NUM]; // local coordinates of cable attachment points on end-effector, ie ^er_B
-    endOut[0] << 0.071, 0.050, -0.225;
-    endOut[1] << -0.086, 0.050, -0.225;
-    endOut[2] << 0.071, -0.050, -0.225;
-    endOut[3] << -0.086, -0.050, -0.225;
-    endOut[4] << 0.1675, 0.045, 0.225;
-    endOut[5] << -0.1675, 0.045, 0.225;
-    endOut[6] << 0.1675, -0.045, 0.225;
-    endOut[7] << -0.1675, -0.045, 0.225;
+    endOut[0] << -0.08487, -0.088698, -0.0785;
+    endOut[1] << 0.08487, -0.088698, -0.0785;
+    endOut[2] << 0.08487, 0.088698, -0.0785;
+    endOut[3] << -0.08487, 0.088698, -0.0785;
+    endOut[4] << -0.115081, -0.124702, 0.0785;
+    endOut[5] << 0.115081, -0.124702, 0.0785;
+    endOut[6] << 0.115081, 0.124702, 0.0785;
+    endOut[7] << -0.115081, 0.124702, 0.0785;
 
     const double pRadius = 0.025; // radius of rotating pulley on frame //0.025
 
