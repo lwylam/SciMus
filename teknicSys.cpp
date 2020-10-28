@@ -22,6 +22,7 @@ void SendMotorGrp(bool IsTorque = false, bool IsLinearRail = false);
 int32_t ToMotorCmd(int motorID, double length);
 void TrjHome();
 bool CheckLimits();
+bool ReadBricksFile();
 void HomeLinearRail(int n);
 void MN_DECL AttentionDetected(const mnAttnReqReg &detected); // this is attention from teknic motors
 
@@ -293,32 +294,13 @@ int main()
     cout << "Choose from menu for cable robot motion:\nt - Read from \"bricks.csv\" file for brick positions\nl - Loop through set num of bricks\nm - Manual input using w,a,s,d,r,f,v,g\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
     do {
         cin >> cmd;
-        ifstream file ("bricks.csv");
-        vector<double> row;
-        string line, word, temp;
         switch (cmd){
             case 'i':    // Show menu
                 cout << "Choose from menu for cable robot motion:\nt - Read from \"bricks.csv\" file for brick positions\nl - Loop through set num of bricks\nm - Manual input using w,a,s,d,r,f,v,g\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
                 break;
             case 't':   // Read brick file, plan trajectory
             case 'T':
-                // Read input file for traj-gen
-                brickPos.clear();
-                if(file.is_open()){
-                    while (getline(file, line)){
-                        row.clear();
-                        stringstream s(line);
-                        while (s >> word){
-                            row.push_back(stod(word)); // convert string to double stod()
-                        }
-                        brickPos.push_back(row);
-                    }
-                    cout << "Completed reading brick position input file" << endl;
-                }
-                else{
-                    cout << "Failed to read input file. Please check \"bricks.csv\" file." << endl;
-                    continue;
-                }
+                if(!ReadBricksFile()){ continue; } // Read "bricks.csv"
                 RunBricksTraj(groupSyncRead, true);
                 break;
             case 'm':   // Manual wasdrf
@@ -455,19 +437,7 @@ int main()
                 int loopNum = 30; // Define the no. of bricks to loop here!!!
                 // Read input file for traj-gen
                 quitType = 'r';
-                brickPos.clear();
-                if(file.is_open()){
-                    while (getline(file, line)){
-                        row.clear();
-                        stringstream s(line);
-                        while (s >> word){
-                            row.push_back(stod(word)); // convert string to double stod()
-                        }
-                        brickPos.push_back(row);
-                    }
-                    cout << "Completed reading brick position input file" << endl;
-                }
-                else{ cout << "Failed to read input file. Please check \"bricks.csv\" file." << endl; continue; }
+                if(!ReadBricksFile()){ continue; } // Read "bricks.csv"
                 cout << "Bricks to loop: " << loopNum << endl;
                 if(brickPos.size()<loopNum){ cout << "Warning! Defined brick file is not long enough for looping.\n"; break; }
                 brickPos.erase(brickPos.begin(), brickPos.end()-loopNum); // Only need the last elements
@@ -1000,6 +970,29 @@ bool CheckLimits(){
     }
     for (int i = 0; i < 3; i++){
         if(spcLimit[i*2]>in1[i] || in1[i]>spcLimit[i*2+1]){ return false; }
+    }
+    return true;
+}
+
+bool ReadBricksFile(){ // Define which file to read here !!!
+    ifstream file ("bricks.csv");
+    vector<double> row;
+    string line, word, temp;
+
+    brickPos.clear();
+    if(file.is_open()){
+        while (getline(file, line)){
+            row.clear();
+            stringstream s(line);
+            while (s >> word){
+                row.push_back(stod(word)); // convert string to double stod()
+            }
+            for(int i=0; i<3; i++){ row[i] /= 1000; } // convert mm to m unit for xyz
+            brickPos.push_back(row);
+        }
+        cout << "Completed reading brick position input file" << endl;
+    }
+    else{ cout << "Failed to read input file. Please check \"bricks.csv\" file." << endl; return false;
     }
     return true;
 }
