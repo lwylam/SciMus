@@ -16,8 +16,8 @@ using namespace std;
 using namespace sFnd;
 
 int CheckMotorNetwork();
-void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention = false);
-void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention = false);
+void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, bool showAttention = false);
+void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, bool showAttention = false);
 void SendMotorGrp(bool IsTorque = false, bool IsLinearRail = false);
 int32_t ToMotorCmd(int motorID, double length);
 void TrjHome();
@@ -301,7 +301,7 @@ int main()
             case 't':   // Read brick file, plan trajectory
             case 'T':
                 if(!ReadBricksFile()){ continue; } // Read "bricks.csv"
-                RunBricksTraj(groupSyncRead, true);
+                RunBricksTraj(groupSyncRead, 0, true);
                 break;
             case 'm':   // Manual wasdrf
             case 'M':
@@ -440,13 +440,13 @@ int main()
                 if(!ReadBricksFile()){ continue; } // Read "bricks.csv"
                 cout << "Bricks to loop: " << loopNum << endl;
                 if(brickPos.size()<loopNum){ cout << "Warning! Defined brick file is not long enough for looping.\n"; break; }
+                int listOffset = brickPos.size() - loopNum;
                 brickPos.erase(brickPos.begin(), brickPos.end()-loopNum); // Only need the last elements
-                cout << brickPos.size() << endl;
                 while(quitType != 'f' && quitType != 'F'){ // if not running the final loop.....
                     // always reverse from a complete built, then rebuild it
-                    ReverseBricksTraj(groupSyncRead, true);
+                    ReverseBricksTraj(groupSyncRead, listOffset, true);
                     if(quitType == 'q' || quitType == 'Q'){ break; }
-                    RunBricksTraj(groupSyncRead, true);
+                    RunBricksTraj(groupSyncRead, listOffset, true);
                     if(quitType == 'q' || quitType == 'Q'){ break; }
                 }
                 cout << "Quit looping trajectory.\n";
@@ -706,7 +706,8 @@ int RunParaBlend(double point[7], bool showAttention = false){
     return 0;
 }
 
-void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention){
+void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, bool showAttention){
+    IBrakeControl &ABB_sgn = nodeList[0]->Port.BrakeControl;
     double brickPickUp[7] = {0.1, 0.1, 2, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!, the last digit is a dummy number for time duration.
     double safePt[3] = {0.2, 0.2, 2.1}; // a safe area near to the arm
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
@@ -718,11 +719,18 @@ void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention){
     
     // Go through the given bricks
     for (int i = 0; i < brickPos.size(); i++) {
+        ABB_sgn.BrakeSetting(0, GPO_OFF); // Reset ABB signal
         // Check if rails need to be raised
         if(brickPos[i][2] != currentBrkLvl){
             currentBrkLvl = brickPos[i][2]; // do we need any sort of offset from building levei??
             if(RaiseRailTo(currentBrkLvl) < 0) { cout << "Trajectory aborted.\n"; return; } // raise rail to the building brick level
         }
+
+        // Update index file for grasshopper display
+        ofstream myfile;
+        myfile.open ("indexBrk.txt");
+        myfile << i + 1 + listOffset;
+        myfile.close();
 
         // Go pick up a brick
         if(showAttention) { cout << "Picking up a brick\n"; }
@@ -739,8 +747,11 @@ void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention){
             dxl2Pos = groupSyncRead.getData(DXL2_ID, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION);
             printf("[ID:%03d] PresPos:%03d\t[ID:%03d] PresPos:%03d\n", DXL1_ID, dxl1Pos, DXL2_ID, dxl2Pos);
         }while((abs(neutralRot - dxl1Pos) > DXL_THRESHOLD) || (abs(gpClose - dxl2Pos) > DXL_THRESHOLD));
+        ABB_sgn.BrakeSetting(0, GPO_ON); // Signal ABB to release gripper and hard code waiting
+        Sleep(500);
 
         // Go to building level
+        ABB_sgn.BrakeSetting(0, GPO_OFF); // Reset ABB signal
         if(showAttention) { cout << "Going to building level\n"; }
         copy(brickPickUp, brickPickUp+2, begin(goalPos));
         goalPos[2] += 0.16;
@@ -776,11 +787,11 @@ void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention){
         goalPos[6] = sqrt(pow(goalPos[0]-in1[0],2)+pow(goalPos[1]-in1[1],2)+pow(goalPos[2]-in1[2],2))/velLmt*1000;
         if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; } // return to safe point 
         
-        cout << "----------Completed brick #" << i + 1 <<"----------" << endl;
+        cout << "----------Completed brick #" << i + 1 + listOffset <<"----------" << endl;
     }
 }
 
-void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention){
+void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, bool showAttention){
     double brickDropOff[7] = {0.1, 0.4, 2, 0, 0, 0, 10}; // !!!! Define the brick drop off point !!!!, the last digit is a dummy number for time duration.
     double safePt[3] = {0.2, 0.4, 2}; // a safe area near the drop off
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
@@ -797,6 +808,12 @@ void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttentio
             currentBrkLvl = brickPos[i][2]; // do we need any sort of offset from building levei??
             if(RaiseRailTo(currentBrkLvl) < 0) { cout << "Trajectory aborted.\n"; return; } // raise rail to the building brick level
         }
+
+        // Update index file for grasshopper display
+        ofstream myfile;
+        myfile.open ("indexBrk.txt");
+        myfile << i + 1 + listOffset;
+        myfile.close();
 
         // Go to building level
         if(showAttention) { cout << "Going to building level\n"; }
@@ -845,7 +862,7 @@ void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttentio
         if(packetHandler->write4ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_POSITION, gpOpen, &dxl_error)){ cout << "Error in opening gripper\n"; return; }
         Sleep(1000); // wait a little after dropping brick
         
-        cout << "----------Retrieved brick #" << i + 1 <<"----------" << endl;
+        cout << "----------Retrieved brick #" << i + 1 + listOffset <<"----------" << endl;
     }
 }
 
