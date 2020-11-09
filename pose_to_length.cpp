@@ -12,14 +12,14 @@ void pose_to_length(double pose[], double lengths[], double rail_offset){
     const int direction[8] = {1,1,1,1,-1,-1,-1,-1};
 
     Vector3d frmOut[CABLE_NUM]; // coordinates of the attachment points on frame at the beginning
-    frmOut[0] << 2.683, 0.0505, 3.372;
-    frmOut[1] << -0.175, 0.0795, 3.375;
-    frmOut[2] << 3.287, -6.5255, 3.555;
-    frmOut[3] << -0.6805, -6.4305, 3.610;
-    frmOut[4] << 2.614, 0.0325, 0.050 + rail_offset; //motors connected to linear rails, coordinates when rail offset is 0
-    frmOut[5] << 0.000, 0.0325, 0.050 + rail_offset;
-    frmOut[6] << 3.068, -6.5075, 0.088 + rail_offset;
-    frmOut[7] << -0.553, -6.4445, 0.077 + rail_offset;
+    frmOut[0] << 0.098, -0.217, 2.443;
+    frmOut[1] << 3.572, -0.205, 2.439;
+    frmOut[2] << 3.568, 3.457, 2.443;
+    frmOut[3] << 0.097,-3.450, 2.446;
+    frmOut[4] << 0.00, -0.033, -0.050 + rail_offset; //motors connected to linear rails, coordinates when rail offset is 0
+    frmOut[5] << 3.662, -0.033, -0.053 + rail_offset;
+    frmOut[6] << 3.678, 3.278, -0.057 + rail_offset;
+    frmOut[7] << 0.018, 3.282, -0.053 + rail_offset;
 
     Vector3d frmOutUnitV[CABLE_NUM]; // unit vectors/directions of the fixed cable attachments on frame
     for(int i = 0; i < CABLE_NUM; i++){ frmOutUnitV[i] << 0, 0, direction[i]; }
@@ -34,7 +34,7 @@ void pose_to_length(double pose[], double lengths[], double rail_offset){
     endOut[6] << 0.115081, 0.124702, 0.0785;
     endOut[7] << -0.115081, 0.124702, 0.0785;
 
-    const double pRadius = 0.025; // radius of rotating pulley on frame //0.025
+    const double pRadius = 0.024175; // radius of rotating pulley on frame //0.025
 
 ////////////////////////////////// End of manual model defination !! //////////////////////////////////    
     // local variables
