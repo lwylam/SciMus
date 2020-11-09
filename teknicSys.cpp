@@ -16,6 +16,7 @@ using namespace std;
 using namespace sFnd;
 
 int CheckMotorNetwork();
+int RunParaBlend(double point[7], bool showAttention = false);
 void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, bool showAttention = false);
 void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, bool showAttention = false);
 void SendMotorGrp(bool IsTorque = false, bool IsLinearRail = false);
@@ -75,7 +76,7 @@ int main()
     IPort &myPort = myMgr->Ports(2);
     pose_to_length(home, offset); // save offset values according to home pose
 
-    cout << "Motor network available. Pick from menu for the next action:\nt - Tighten cables with Torque mode\ny - Loose the cables\ns - Set current position as home\nh - Move to Home\n8 - Manually adjust cable lengths\nl - Linear rails motions\nu - Update current position from external file\ni - Info: show menu\nn - Move on to Next step" << endl;
+    cout << "Motor network available. Pick from menu for the next action:\nt - Tighten cables with Torque mode\ny - Loose the cables\ns - Set current position as home\nh - Move to Home\n8 - Manually adjust cable lengths\nl - Linear rails motions\nu - Update current position from external file\nr - Reset Rotation to zero\ni - Info: show menu\nn - Move on to Next step" << endl;
     char cmd;
     try{
         do {
@@ -83,7 +84,7 @@ int main()
             cin >> cmd;
             switch (cmd){
                 case 'i':   // Show menu
-                    cout << "Pick from menu for the next action:\nt - Tighten cables with Torque mode\ny - Loose the cables\ns - Set current position as home\nh - Move to Home\n8 - Manually adjust cable lengths\nl - Linear rails motions\nu - Update current position from external file\ni - Info: show menu\nn - Move on to Next step\n";
+                    cout << "Pick from menu for the next action:\nt - Tighten cables with Torque mode\ny - Loose the cables\ns - Set current position as home\nh - Move to Home\n8 - Manually adjust cable lengths\nl - Linear rails motions\nu - Update current position from external file\nr - Reset Rotation to zero\ni - Info: show menu\nn - Move on to Next step\n";
                     break;
                 case 'y':   // Loosen cables using positive torque
                     targetTorque = 1;
@@ -189,6 +190,16 @@ int main()
                     }
                     cout << "Manual adjustment terminated" << endl;
                     break;
+                case 'r':
+                    cout << "Attenion: robot will rotate to 0,0,0...\n";
+                    {
+                        double point[7] = {0,0,0,0,0,0,3500}; // Default 3500 ms duaration to rotate to 0
+                        copy(in1, in1+3, begin(point)); // copy x,y,z position
+                        cout << "Goal coordinates: " << point[0] << ", " << point[1] << ", " << point[2] << ", " << point[3] << ", " << point[4] << ", " << point[5] << ", " << point[6] << endl;
+                        if(RunParaBlend(point) < 0) { cout << "Trajectory aborted.\n"; break; }
+                        cout << "Rotation reset completed.\n";      
+                    }
+                    break;
                 case 'l':   // Linear rail motions
                     cout << "0 to 3 - home linear rail individually\n4 - home all 4 linear rails automatically\nb - Back to previous menu\nany other keys - stop the linear rail from current motion\n";
                     while(cmd != 'b'){
@@ -242,7 +253,6 @@ int main()
                         cout << "Linear rail offset: " << railOffset << endl;
                     }
                     break;
-                
             }
         } while(cmd != 'n');
     }
@@ -617,7 +627,7 @@ int RaiseRailTo(double target){ // !!! Define velocity limit !!!
     return 0;
 }
 
-int RunParaBlend(double point[7], bool showAttention = false){
+int RunParaBlend(double point[7], bool showAttention){
     float vMax[6] = {.4, .4, .4, 0.8, 0.8, 0.8}; // m/s, define the maximum velocity for each DoF
     float aMax[6] = {80, 80, 80, 10, 10, 10}; // m/s^2, define the maximum acceleration for each DoF
     double sQ[6], Q[6], o[6];
@@ -707,7 +717,6 @@ int RunParaBlend(double point[7], bool showAttention = false){
 }
 
 void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, bool showAttention){
-    IBrakeControl &ABB_sgn = nodeList[0]->Port.BrakeControl;
     double brickPickUp[7] = {0.1, 0.1, 2, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!, the last digit is a dummy number for time duration.
     double safePt[3] = {0.2, 0.2, 2.1}; // a safe area near to the arm
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
@@ -719,7 +728,6 @@ void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, bool 
     
     // Go through the given bricks
     for (int i = 0; i < brickPos.size(); i++) {
-        ABB_sgn.BrakeSetting(0, GPO_OFF); // Reset ABB signal
         // Check if rails need to be raised
         if(brickPos[i][2] != currentBrkLvl){
             currentBrkLvl = brickPos[i][2]; // do we need any sort of offset from building levei??
@@ -747,19 +755,17 @@ void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, bool 
             dxl2Pos = groupSyncRead.getData(DXL2_ID, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION);
             printf("[ID:%03d] PresPos:%03d\t[ID:%03d] PresPos:%03d\n", DXL1_ID, dxl1Pos, DXL2_ID, dxl2Pos);
         }while((abs(neutralRot - dxl1Pos) > DXL_THRESHOLD) || (abs(gpClose - dxl2Pos) > DXL_THRESHOLD));
-        ABB_sgn.BrakeSetting(0, GPO_ON); // Signal ABB to release gripper and hard code waiting
         Sleep(500);
 
         // Go to building level
-        ABB_sgn.BrakeSetting(0, GPO_OFF); // Reset ABB signal
         if(showAttention) { cout << "Going to building level\n"; }
-        copy(brickPickUp, brickPickUp+2, begin(goalPos));
+        copy(brickPickUp, brickPickUp+3, begin(goalPos));
         goalPos[2] += 0.16;
         goalPos[6] = safeT;
         if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; } // raise the brick from robot arm
         rotationG = brickPos[i][3] * 11.26666;; // conversion from angle to motor command
         if(packetHandler->write4ByteTxRx(portHandler, DXL1_ID, ADDR_GOAL_POSITION, rotationG, &dxl_error)){ cout << "Error in rotating gripper\n"; return; }
-        copy(safePt, safePt+1, begin(goalPos)); // safe x,y position
+        copy(safePt, safePt+2, begin(goalPos)); // safe x,y position
         goalPos[2] = brickPos[i][2] + safeH; // brick level
         goalPos[6] = sqrt(pow(goalPos[0]-in1[0],2)+pow(goalPos[1]-in1[1],2)+pow(goalPos[2]-in1[2],2))/velLmt*1000;
         if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; } // raise the brick to building level
@@ -818,7 +824,7 @@ void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, b
         // Go to building level
         if(showAttention) { cout << "Going to building level\n"; }
         if(packetHandler->write4ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_POSITION, gpOpen, &dxl_error)){ cout << "Error in opening gripper\n"; return; }
-        copy(in1, in1+1, begin(goalPos));
+        copy(in1, in1+2, begin(goalPos));
         goalPos[2] = brickPos[i][2] + safeH; // brick level
         goalPos[6] = sqrt(pow(goalPos[2]-in1[2],2))/velLmt*1000; // calculate time
         if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; } // raise from current pos to builing level
