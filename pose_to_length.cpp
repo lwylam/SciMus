@@ -15,7 +15,7 @@ void pose_to_length(double pose[], double lengths[], double rail_offset){
     frmOut[0] << 0.098, -0.217, 2.443;
     frmOut[1] << 3.572, -0.205, 2.439;
     frmOut[2] << 3.568, 3.457, 2.443;
-    frmOut[3] << 0.097,-3.450, 2.446;
+    frmOut[3] << 0.097, 3.450, 2.446;
     frmOut[4] << 0.00, -0.033, -0.050 + rail_offset; //motors connected to linear rails, coordinates when rail offset is 0
     frmOut[5] << 3.662, -0.033, -0.053 + rail_offset;
     frmOut[6] << 3.678, 3.278, -0.057 + rail_offset;
