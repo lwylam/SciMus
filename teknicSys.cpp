@@ -19,7 +19,7 @@ int CheckMotorNetwork();
 int RunParaBlend(double point[7], bool showAttention = false);
 void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, bool showAttention = false);
 void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, bool showAttention = false);
-void RunDemoTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, bool showAttention = false);
+void RunDemoTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention = false);
 void SendMotorGrp(bool IsTorque = false, bool IsLinearRail = false);
 int32_t ToMotorCmd(int motorID, double length);
 void TrjHome();
@@ -283,14 +283,14 @@ int main()
         else if (dxl_error != 0) { cout << "Error: " << dxl_error << endl; }
         else { printf("Dynamixel#%d has been successfully connected \n", DXL1_ID); }
 
-        Sleep(50);
+        Sleep(20);
         // Change Dynamixel#2 to current mode
         dxl_comm_result = packetHandler->write1ByteTxRx(portHandler, DXL2_ID, 11, 0, &dxl_error);
         if (dxl_comm_result != COMM_SUCCESS) {cout << "Torque Comm result: " << dxl_comm_result <<endl; }
         else if (dxl_error != 0) { cout << "Error: " << dxl_error << endl; }
         else { printf("Dynamixel#%d has been successfully connected \n", DXL2_ID); }
 
-        Sleep(50);
+        Sleep(20);
         // Enable Dynamixel#2 Torque
         dxl_comm_result = packetHandler->write1ByteTxRx(portHandler, DXL2_ID, ADDR_TORQUE_ENABLE, 1, &dxl_error);
         if (dxl_comm_result != COMM_SUCCESS) {cout << "Torque Comm result: " << dxl_comm_result <<endl; }
@@ -334,12 +334,10 @@ int main()
                     switch(cmd){
                         case 'I':
                         case 'i':
-                            cout << gpClose << "CLose\n";
                             if(packetHandler->write2ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_CURRENT, gpClose, &dxl_error)){ cout << "Error in closing gripper\n"; }
                             continue;
                         case 'O':
                         case 'o':
-                            cout << gpOpen << "OPen\n";
                             if(packetHandler->write2ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_CURRENT, gpOpen, &dxl_error)){ cout << "Error in opening gripper\n"; }
                             continue;
                         case 'P':
@@ -500,10 +498,15 @@ int main()
                 }
 
                 quitType = 'r';
-                while(quitType != 'f' && quitType != 'F'){ // if not running the final loop.....
-                    // always reverse from a complete built, then rebuild it
-                    RunDemoTraj(groupSyncRead, 0, true);
+                // while(quitType != 'f' && quitType != 'F'){ // if not running the final loop.....
+                //     // always reverse from a complete built, then rebuild it
+                //     RunDemoTraj(groupSyncRead, 0, true);
+                //     if(quitType == 'q' || quitType == 'Q'){ break; }
+                // }
+                for(int n = 0; n<6; n++ ){ // if not running the final loop.....
+                    RunDemoTraj(groupSyncRead, true);
                     if(quitType == 'q' || quitType == 'Q'){ break; }
+                    if(quitType == 'f' || quitType == 'F'){ break; }
                 }
                 cout << "Quit looping demo trajectory.\n";
                 break;
@@ -939,11 +942,11 @@ void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, b
     }
 }
 
-void RunDemoTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, bool showAttention){ 
+void RunDemoTraj(dynamixel::GroupSyncRead groupSyncRead, bool showAttention){ 
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
-    double velLmt = 0.1; // meters per second
-    double safeT = 1500; // in ms, time to raise to safety height
-    double safeH = 0.08; // meter, safety height from building brick level
+    const double velLmt = 0.10; // meters per second
+    const double safeT = 1500; // in ms, time to raise to safety height
+    const double safeH = 0.08; // meter, safety height from building brick level
     double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as target BrkLvl
     double dura = 0;
     
@@ -968,7 +971,6 @@ void RunDemoTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, bool sh
         // Go to brick placing position
         Sleep(500);
         rotationG = brickPos[i][3] * 11.26666; // conversion from angle to motor command
-        cout << i << ": Rotate to pick up angle\n";
         if(packetHandler->write4ByteTxRx(portHandler, DXL1_ID, ADDR_GOAL_POSITION, rotationG, &dxl_error)){ cout << "Error in rotating gripper\n"; return; }
         if(showAttention) { cout << "Going to brick position\n"; }
         goalPos[0] = brickPos[i][0];                       
@@ -996,7 +998,6 @@ void RunDemoTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, bool sh
         // Rotate brick to next place down brick posisiton angle
         Sleep(500);
         rotationG = brickPos[i][3] * 11.26666; // conversion from angle to motor command
-        cout << i << ": Rotate to drop off angle\n";
         if(packetHandler->write4ByteTxRx(portHandler, DXL1_ID, ADDR_GOAL_POSITION, rotationG, &dxl_error)){ cout << "Error in rotating gripper\n"; return; }
         
         // Go to brick placing position
@@ -1018,7 +1019,9 @@ void RunDemoTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, bool sh
         if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; } // leave building level
               
         cout << "IN: "<< in1[0] << " " << in1[1] << " " << in1[2] << " " << in1[3] << " " << in1[4] << " " << in1[5] << railOffset << endl;
-        cout << "----------Completed brick #" << i + 1 + listOffset <<"----------" << endl;
+        cout << "----------Completed brick #" << i + 1 <<"----------" << endl;
+
+        if(!((i+1)%8)){ cout << "Small break for 1 minute..\n"; Sleep(60000); } // Sleep for a minute before next run for every 8 loop 
     }
     copy(home, home+3, begin(goalPos));
     goalPos[6] = sqrt(pow(goalPos[0]-in1[0],2)+pow(goalPos[1]-in1[1],2)+pow(goalPos[2]-in1[2],2))/velLmt*1000;
