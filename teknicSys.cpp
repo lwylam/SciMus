@@ -15,6 +15,7 @@
 using namespace std;
 using namespace sFnd;
 
+bool SetSerialParams();
 int CheckMotorNetwork();
 int RunParaBlend(double point[7], bool showAttention = false);
 void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, bool showAttention = false);
@@ -58,9 +59,20 @@ const int DXL1_ID = 1, DXL2_ID = 2; //dxl 1 is rotation motor, dxl 2 is gripper 
 const int ADDR_TORQUE_ENABLE = 64, ADDR_GOAL_POSITION = 116, ADDR_PRESENT_POSITION = 132, ADDR_GOAL_CURRENT = 102, ADDR_PRESENT_CURRENT = 126; // Control table adresses
 const int LEN_GOAL_POSITION = 4, LEN_PRESENT_POSITION = 4, LEN_GOAL_CURRENT = 2, LEN_PRESENT_CURRENT = 2, DXL_THRESHOLD = 10;
 
+HANDLE hComm; // Handle to the Serial port, https://github.com/xanthium-enterprises/Serial-Programming-Win32API-C
+DWORD dwEventMask, BytesRead, dNoOfBytesWritten = 0;
+bool Status;
+char ComPortName[] = "\\\\.\\COM11"; // Name of the arduino Serial port(May Change) to be opened,
+unsigned char tmp, msg[256], Ard_char[] = {'s'};
 
 int main()
 {   
+    //// Open serial port for Arduino
+    hComm = CreateFile(ComPortName, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+    if (hComm == INVALID_HANDLE_VALUE){ cout << "Error: " << ComPortName << " cannot be opened.\n"; }
+    else { cout << ComPortName << " opened.\n"; }
+    if (!SetSerialParams()) { return -1; }
+    
     //// initiallize cable robot motor network
     SysManager* myMgr = SysManager::Instance();
     // Start the programme, scan motors in network
@@ -528,6 +540,12 @@ int main()
     myfile.close();
     
     //// List of what-if-s??
+    
+    {   // Send 'p'signal to arduino for shutting down
+        Ard_char[0] = 'p';
+        if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; }
+        CloseHandle(hComm); //Close the Serial Port
+    }
 
     {   // Disable Dynamixel Torque
         dxl_comm_result = packetHandler->write1ByteTxRx(portHandler, DXL1_ID, ADDR_TORQUE_ENABLE, 0, &dxl_error);
@@ -550,6 +568,49 @@ int main()
     myMgr->PortsClose(); // Close down the ports
     cout << "Teknic motors are disabled\n";
     return 1;
+}
+
+bool SetSerialParams(){
+    // Set parameters for serial port
+    DCB dcbSerialParams = { 0 }; // Initializing DCB structure
+    dcbSerialParams.DCBlength = sizeof(dcbSerialParams);
+    Status = GetCommState(hComm, &dcbSerialParams); // retreives  the current settings
+    if (Status == false){ cout << "Error in GetCommState()\n"; return false; }
+
+    dcbSerialParams.BaudRate = CBR_115200;// Setting BaudRate
+    dcbSerialParams.ByteSize = 1;         // Setting ByteSize = 8
+    dcbSerialParams.StopBits = ONESTOPBIT;// Setting StopBits = 1
+    dcbSerialParams.Parity   = NOPARITY;  // Setting Parity = None
+
+    SetCommState(hComm, &dcbSerialParams);
+    if (Status == false){ cout << "Error! in Setting DCB Structure\n"; return false; }
+    else{
+        printf("   Setting DCB Structure Successful\n");
+        printf("       Baudrate = %d\n", dcbSerialParams.BaudRate);
+        printf("       ByteSize = %d\n", dcbSerialParams.ByteSize);
+        printf("       StopBits = %d\n", dcbSerialParams.StopBits);
+        printf("       Parity   = %d\n", dcbSerialParams.Parity);
+        cout << endl;
+    }
+
+    // Set timeouts
+    COMMTIMEOUTS timeouts = { 0 };
+    timeouts.ReadIntervalTimeout         = 50;
+    timeouts.ReadTotalTimeoutConstant    = 50;
+    timeouts.ReadTotalTimeoutMultiplier  = 10;
+    timeouts.WriteTotalTimeoutConstant   = 50;
+    timeouts.WriteTotalTimeoutMultiplier = 10;
+
+    if (SetCommTimeouts(hComm, &timeouts) == FALSE){ cout << "Error! in Setting Time Outs\n"; return false; }
+    // Set recieve mask                
+    if (!(bool)SetCommMask(hComm, EV_RXCHAR)){ cout << "Error! in Setting CommMask\n"; }
+    
+    // send start signal 's' to arduino
+    Ard_char[0] = 'i';
+    if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; }
+    Ard_char[0] = 's';
+    if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; }
+    return true;
 }
 
 int CheckMotorNetwork() {
@@ -804,18 +865,27 @@ void RunBricksTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, bool 
         copy(brickPickUp, brickPickUp+3, begin(goalPos));
         goalPos[2] += 0.14;
         if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; } // Go to safe height above pick up
+        // Wait for brick to be ready from ABB
+        msg[0] = 'w';
+        while(msg[0]!='d'){
+            Status = WaitCommEvent(hComm, &dwEventMask, NULL); // wait till brick is ready from ABB
+            if (Status == false){ cout << "Error in setting WaitCommEvent()\n"; quitType = 'q'; return; }
+            else {
+                ReadFile(hComm, &tmp, sizeof(tmp), &BytesRead, NULL);
+                msg[0] = tmp;
+                cout << msg[0] << ";";
+                if(msg[0]=='d'){ cout << "Brick is ready from ABB :) \n"; }
+            }
+        }
+        // fall and pick up brick
         brickPickUp[6] = safeT;
         if(RunParaBlend(brickPickUp) < 0) { cout << "Trajectory aborted.\n"; return; } // Go pick up
         Sleep(1000); //////////// FOR TESTING ONYL, delete later!!!!!!!!!!!!!!!!!!
         if(packetHandler->write2ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_CURRENT, gpClose, &dxl_error)){ cout << "Error in closing gripper\n"; return; }
-        // do{ // wait till gripper is closed
-        //     if(dxl_comm_result = groupSyncRead.txRxPacket()){ cout << "Comm error in reading packet: " << dxl_comm_result << endl; } 
-        //     // Get present position value
-        //     dxl1Pos = groupSyncRead.getData(DXL1_ID, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION);
-        //     dxl2Pos = groupSyncRead.getData(DXL2_ID, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION);
-        //     printf("[ID:%03d] PresPos:%03d\t[ID:%03d] PresPos:%03d\n", DXL1_ID, dxl1Pos, DXL2_ID, dxl2Pos);
-        // }while((abs(neutralRot - dxl1Pos) > DXL_THRESHOLD) || (abs(gpClose - dxl2Pos) > DXL_THRESHOLD));
-        Sleep(1500); // wait for grippper to close
+        Sleep(500); // wait for grippper to close
+        Ard_char[0] = 'r'; // Signal arduino to release ABB gripper and hard code waiting
+        if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; quitType = 'q'; return; }
+        Sleep(1000); // wait for ABB to leave???
 
         // Go to building level
         if(showAttention) { cout << "Going to building level\n"; }
@@ -909,13 +979,6 @@ void ReverseBricksTraj(dynamixel::GroupSyncRead groupSyncRead, int listOffset, b
         goalPos[6] = safeT;
         if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; }
         if(packetHandler->write2ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_CURRENT, gpClose, &dxl_error)){ cout << "Error in closing gripper\n"; return; }
-        // do{ // wait till gripper is closed
-        //     if(dxl_comm_result = groupSyncRead.txRxPacket()){ cout << "Comm error in reading packet: " << dxl_comm_result << endl; } 
-        //     // Get present position value
-        //     dxl1Pos = groupSyncRead.getData(DXL1_ID, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION);
-        //     dxl2Pos = groupSyncRead.getData(DXL2_ID, ADDR_PRESENT_POSITION, LEN_PRESENT_POSITION);
-        //     printf("[ID:%03d] PresPos:%03d\t[ID:%03d] PresPos:%03d\n", DXL1_ID, dxl1Pos, DXL2_ID, dxl2Pos);
-        // }while((abs(gpClose - dxl2Pos) > DXL_THRESHOLD));
         Sleep(1500); // Wait for gripper to close
 
         // Rise and leave building area, stand by for next brick pick up
