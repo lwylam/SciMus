@@ -49,11 +49,12 @@ double out1[12] = {2.87451, 2.59438, 2.70184, 2.40053, 2.46908, 2.15523, 2.65123
 double a[6], b[6], c[6], d[6], e[6], f[6], g[6], tb[6]; // trajectory coefficients
 char limitType = 'C'; // A for home, B for limits, C for default
 char quitType = 'r'; // q for emergency quit, f for finish traj, r for resume/default
+int loopCount = 0;
 
 dynamixel::PortHandler *portHandler;
 dynamixel::PacketHandler *packetHandler;
 uint8_t dxl_error = 0; // Dynamixel error
-int32_t dxl1Pos = 0, dxl2Pos = 0, gpOpen = -20, gpClose = 80, neutralRot = 1820; // define some position reading, and gripper commands. neutralRot is 1024.90 deg // 1820 is 160 deg
+int32_t dxl1Pos = 0, dxl2Pos = 0, gpOpen = -30, gpClose = 80, neutralRot = 1820; // define some position reading, and gripper commands. neutralRot is 1024.90 deg // 1820 is 160 deg
 int dxl_comm_result, rotationG, gripperG;
 const int DXL1_ID = 1, DXL2_ID = 2; //dxl 1 is rotation motor, dxl 2 is gripper motor
 const int ADDR_TORQUE_ENABLE = 64, ADDR_GOAL_POSITION = 116, ADDR_PRESENT_POSITION = 132, ADDR_GOAL_CURRENT = 102, ADDR_PRESENT_CURRENT = 126; // Control table adresses
@@ -511,11 +512,16 @@ int main()
                 else{ cout << "Failed to read input file. Please check \"bricks.csv\" file." << endl; break;
                 }
 
+                loopCount = 0;
+
                 quitType = 'r';
                 while(quitType != 'f' && quitType != 'F'){ // if not running the final loop.....
                     // always reverse from a complete built, then rebuild it
                     RunDemoTraj(groupSyncRead, true);
+                    loopCount += 1;
                     if(quitType == 'q' || quitType == 'Q'){ break; }
+                    cout << "Taking a 5 sec rest ;) \n"; Sleep(5000); // Sleep for a while before next run for every 8 loop 
+                    if(!(loopCount%25)){ cout << "Taking a 15 minute rest~ ^O^ \n\n"; Sleep(1000*900); } // Sleep for a while before next run for every 400 loop
                 }
                 // for(int n = 0; n<6; n++ ){ // if not running the final loop.....
                 //     RunDemoTraj(groupSyncRead, true);
@@ -608,11 +614,11 @@ bool SetSerialParams(){
     // Set recieve mask                
     if (!(bool)SetCommMask(hComm, EV_RXCHAR)){ cout << "Error! in Setting CommMask\n"; }
     
-    // send start signal 's' to arduino
-    Ard_char[0] = 'i';
-    if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; }
-    Ard_char[0] = 's';
-    if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; }
+    // // send start signal 's' to arduino
+    // Ard_char[0] = 'i';
+    // if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; }
+    // Ard_char[0] = 's';
+    // if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; }
     return true;
 }
 
@@ -698,6 +704,7 @@ int RaiseRailTo(double target){ // !!! Define velocity limit !!!
 
     double velLmt = 0.005; // meters per sec
     double dura = abs(target - railOffset)/velLmt*1000;// *1000 to change unit to ms
+    if(dura <= 200){ return 0; } // Don't run traj for incorrect timing 
     double a, b, c; // coefficients for cubic spline trajectory
     cout << "\nATTENTION: Raise rail function is called. Estimated time: " << dura << "\n";
     nodeList[8]->Port.BrakeControl.BrakeSetting(0, BRAKE_ALLOW_MOTION); // disable brake before motion
@@ -851,7 +858,7 @@ double ScaleBrkLvl(double brickLvl){
 
 void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset, bool showAttention){
     // 0.75 0.865 1.6 p10 //{0.6723, 1.3195, 1.4611
-    double brickPickUp[7] = {0.7759, 0.8639, 1.595, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!, the last digit is a dummy number for time duration.
+    double brickPickUp[7] = {0.756, 0.868, 1.595, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!, the last digit is a dummy number for time duration.
     double safePt[3] = {1.5, 1.37, 1.65}; // a safe area near to the arm // 0.21 safe height from ABB
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
     double velLmt = 0.10; // meters per second
@@ -901,14 +908,14 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
         // fall and pick up brick
         brickPickUp[6] = safeT*1.2;
         if(RunParaBlend(brickPickUp) < 0) { cout << "Trajectory aborted.\n"; return; } // Go pick up
-        Sleep(1000); //////////// FOR TESTING ONYL, delete later!!!!!!!!!!!!!!!!!!
+        Sleep(600); //////////// FOR TESTING ONYL, delete later!!!!!!!!!!!!!!!!!!
         if(packetHandler->write2ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_CURRENT, gpClose, &dxl_error)){ cout << "Error in closing gripper\n"; return; }
         Sleep(500); // wait for grippper to close
         // cout << "Waiting for quitType: ";
         // cin >> quitType;
         Ard_char[0] = 'r'; // Signal arduino to release ABB gripper and hard code waiting
         if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; quitType = 'q'; return; }
-        Sleep(10000); // wait for ABB to release gripper???
+        Sleep(7000); // wait for ABB to release gripper???
 
         // Go to building level
         if(showAttention) { cout << "Raising brick from ABB\n"; }
@@ -1026,7 +1033,7 @@ void ReverseBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOf
         brickDropOff[2] -= 0.02; // go down a little more before real drop
         if(RunParaBlend(brickDropOff) < 0) { cout << "Trajectory aborted.\n"; return; }
         if(packetHandler->write2ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_CURRENT, gpOpen, &dxl_error)){ cout << "Error in opening gripper\n"; return; }
-        Sleep(1000); // wait a little after dropping brick
+        Sleep(500); // wait a little after dropping brick
         brickDropOff[2] += 0.02; // go up a little more after real drop
         if(RunParaBlend(brickDropOff) < 0) { cout << "Trajectory aborted.\n"; return; }
         copy(begin(safePt), end(safePt), begin(goalPos)); // safe point
@@ -1120,9 +1127,6 @@ void RunDemoTraj(const dynamixel::GroupSyncRead &groupSyncRead, bool showAttenti
               
         cout << "IN: "<< in1[0] << " " << in1[1] << " " << in1[2] << " " << in1[3] << " " << in1[4] << " " << in1[5] << railOffset << endl;
         cout << "----------Completed brick #" << i + 1 <<"----------" << endl;
-
-        if(!((i+1)%400)){ cout << "Taking a 15 minute rest~ ^O^ \n\n"; Sleep(1000*900); } // Sleep for a while before next run for every 400 loop 
-        else if(!((i+1)%8)){ cout << "Taking a 5 sec rest ;) \n"; Sleep(5000); } // Sleep for a while before next run for every 8 loop 
     }
     copy(home, home+3, begin(goalPos));
     goalPos[6] = sqrt(pow(goalPos[0]-in1[0],2)+pow(goalPos[1]-in1[1],2)+pow(goalPos[2]-in1[2],2))/velLmt*1000;
@@ -1275,6 +1279,7 @@ bool ReadBricksFile(){ // Define which file to read here !!!
                 row.push_back(stod(word)); // convert string to double stod()
             }
             for(int i=0; i<3; i++){ row[i] /= 1000; } // convert mm to m unit for xyz
+            row[2] *=1.01; // actual scale of bricks
             row[3] += 90; // convert Adam's file to robot rotation, 90deg offset
             if(row[3]<0){ row[3] += 180; } // convert -ve rotation to +ve
             brickPos.push_back(row);
