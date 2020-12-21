@@ -757,6 +757,7 @@ int RunParaBlend(double point[7], bool showAttention){
     float aMax[6] = {80, 80, 80, 10, 10, 10}; // m/s^2, define the maximum acceleration for each DoF
     double sQ[6], Q[6], o[6];
     double dura = point[6];
+    double unitV = sqrt(pow(point[0]-in1[0],2)+pow(point[1]-in1[1],2)+pow(point[2]-in1[2],2)); // the root to divide by to get unit vector
     cout << "Will run for " << dura << "ms...\n";
     if(dura <= 200){ return 0; } // Don't run traj for incorrect timing 
     
@@ -766,7 +767,7 @@ int RunParaBlend(double point[7], bool showAttention){
         Q[i] = point[i]; // end point, from goal position
         vMax[i] /= 1000; // change the velocity unit to meter per ms
         aMax[i] /= 1000000; // change the unit to meter per ms square
-        tb[i] = dura - (Q[i] - sQ[i]) / vMax[i];
+        tb[i] = i<3? dura-unitV/vMax[i] : dura-abs(Q[i]-sQ[i])/vMax[i];
         if(tb[i] < 0) {
             cout << "WARNING: Intended trajectory exceeds velocity limit in DoF "<< i << ".\n";
             return -1;
@@ -776,7 +777,9 @@ int RunParaBlend(double point[7], bool showAttention){
             tb[i] = dura / 2;
             vMax[i] = 2 * (Q[i] - sQ[i]) / dura;
         }
-        o[i] = vMax[i] / 2 / tb[i];
+        else if(i<3){ vMax[i] = vMax[i] * (Q[i] - sQ[i]) / unitV; } // vMax in x,y,z accordingly
+        else if(Q[i]<sQ[i]){ vMax[i] *= -1; } //Fix velocity direction for rotation
+        o[i] = vMax[i] / 2 / tb[i]; // times 2 to get acceleration
         if(abs(o[i]*2) > aMax[i]){
             cout << "WARNING: Intended trajectory acceleration <" << abs(o[i]*2) << "> exceeds limit in DoF "<< i << ".\n";
             return -1;
