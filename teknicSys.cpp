@@ -523,11 +523,6 @@ int main()
                     cout << "Taking a 5 sec rest ;) \n"; Sleep(5000); // Sleep for a while before next run for every 8 loop 
                     if(!(loopCount%25)){ cout << "Taking a 15 minute rest~ ^O^ \n\n"; Sleep(1000*900); } // Sleep for a while before next run for every 400 loop
                 }
-                // for(int n = 0; n<6; n++ ){ // if not running the final loop.....
-                //     RunDemoTraj(groupSyncRead, true);
-                //     if(quitType == 'q' || quitType == 'Q'){ break; }
-                //     if(quitType == 'f' || quitType == 'F'){ break; }
-                // }
                 cout << "Quit looping demo trajectory.\n";
                 break;
         }
@@ -969,6 +964,14 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
         
         cout << "IN: "<< in1[0] << " " << in1[1] << " " << in1[2] << " " << in1[3] << " " << in1[4] << " " << in1[5] << railOffset << endl;
         cout << "----------Completed brick #" << i + 1 + listOffset <<"----------" << endl;
+        // After brick #1 and 4, wait for button input (InA), unless for "finish this loop" quitType.
+        if(i == 1 || i == 4){ 
+            cout << "...Waiting for button input...\n";
+            while(!nodeList[0]->Status.RT.Value().cpm.InA){
+                nodeList[0]->Status.RT.Refresh(); // Refresh again to check if button is pushed
+                if(quitType == 'f' || quitType == 'F'){ break; }
+            }
+        } 
     }
     packetHandler->write2ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_CURRENT, 0, &dxl_error);
     copy(home, home+3, begin(goalPos));
