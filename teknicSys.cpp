@@ -471,7 +471,7 @@ int main()
                 break;
             case 'l':   // Read brick file, loop through a set no. of bricks
             case 'L':
-                {int loopNum = 4; // Define the no. of bricks to loop here!!!
+                {int loopNum = 5; // Define the no. of bricks to loop here!!!
                 // Read input file for traj-gen
                 quitType = 'r';
                 if(!ReadBricksFile()){ continue; } // Read "bricks.csv"
@@ -605,7 +605,7 @@ bool SetSerialParams(){
     // Set timeouts
     COMMTIMEOUTS timeouts = { 0 };
     timeouts.ReadIntervalTimeout         = 50;
-    timeouts.ReadTotalTimeoutConstant    = 50;
+    timeouts.ReadTotalTimeoutConstant    = 50; //50
     timeouts.ReadTotalTimeoutMultiplier  = 10;
     timeouts.WriteTotalTimeoutConstant   = 50;
     timeouts.WriteTotalTimeoutMultiplier = 10;
@@ -700,18 +700,18 @@ int CheckMotorNetwork() {
 }
 
 int RaiseRailTo(double target){ // !!! Define velocity limit !!!
+    cout << "RAil target: " << target << endl;
     if (target < 0 || target > 1.25) { cout << "WARNING! Intended rail offset is out of bound!\n"; return -2; }
-
+    nodeList[8]->Port.BrakeControl.BrakeSetting(0, BRAKE_ALLOW_MOTION); // disable brake before motion
     double velLmt = 0.005; // meters per sec
     double dura = abs(target - railOffset)/velLmt*1000;// *1000 to change unit to ms
     if(dura <= 200){ return 0; } // Don't run traj for incorrect timing 
     double a, b, c; // coefficients for cubic spline trajectory
     cout << "\nATTENTION: Raise rail function is called. Estimated time: " << dura << "\n";
-    nodeList[8]->Port.BrakeControl.BrakeSetting(0, BRAKE_ALLOW_MOTION); // disable brake before motion
-
+    
     // Solve coefficients of equations for cubic
     a = railOffset;
-    b = 3 / (dura * dura) * (target - railOffset);
+    b = 3 / (dura * dura) * (target - railOffset); 
     c = -2 / (dura * dura * dura) * (target - railOffset);
     
     // Run the trajectory till the given time is up
@@ -852,7 +852,7 @@ int RunParaBlend(double point[7], bool showAttention){
     return 0;
 }
 
-double ScaleBrkLvl(double brickLvl){
+double ScaleRailLvl(double brickLvl){
     double output = brickLvl * 0.8;
     if (output > 1.2){ return 1.2; } // Upper limit of linear rail
     else if (output < 0) { return 0; } // lower limit of linear rail
@@ -861,10 +861,10 @@ double ScaleBrkLvl(double brickLvl){
 
 void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset, bool showAttention){
     // 0.75 0.865 1.6 p10 //{0.6723, 1.3195, 1.4611
-    double brickPickUp[7] = {0.756, 0.868, 1.595, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!, the last digit is a dummy number for time duration.
+    double brickPickUp[7] = {0.76, 0.85978, 1.595, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!, the last digit is a dummy number for time duration.
     double safePt[3] = {1.5, 1.37, 1.65}; // a safe area near to the arm // 0.21 safe height from ABB
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
-    double velLmt = 0.10; // meters per second
+    double velLmt = 0.15; // meters per second
     double safeT = 1200; // in ms, time to raise to safety height
     double safeH = 0.08; // meter, safety height from building brick level
     double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as target BrkLvl
@@ -873,8 +873,8 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
     // Go through the given bricks
     for (int i = 0; i < brickPos.size(); i++) {
         // Check if rails need to be raised
-        if(ScaleBrkLvl(brickPos[i][2] - 0.04) != currentBrkLvl){
-            currentBrkLvl = ScaleBrkLvl(brickPos[i][2] - 0.04); // Offset one brick height from building levei, ie 0.04m
+        if(ScaleRailLvl(brickPos[i][2] - 0.04) != currentBrkLvl){
+            currentBrkLvl = ScaleRailLvl(brickPos[i][2] - 0.0404); // Offset one brick height from building levei, ie 0.0404m
             if(RaiseRailTo(currentBrkLvl) < 0) { cout << "Trajectory aborted.\n"; return; } // raise rail to the building brick level
         }
 
@@ -888,7 +888,7 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
         if(showAttention) { cout << "Picking up a brick\n"; }
         Ard_char[0] = 'g'; // Signal arduino to release ABB gripper and hard code waiting
         if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; quitType = 'q'; return; }
-        if(packetHandler->write4ByteTxRx(portHandler, DXL1_ID, ADDR_GOAL_POSITION, 114, &dxl_error)){ cout << "Error in rotating gripper\n"; return; } //114 is 10 deg
+        if(packetHandler->write4ByteTxRx(portHandler, DXL1_ID, ADDR_GOAL_POSITION, 80, &dxl_error)){ cout << "Error in rotating gripper\n"; return; } //////////////////80 is 7 deg
         Sleep(10); // short break between RS-485 communication
         if(packetHandler->write2ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_CURRENT, gpOpen, &dxl_error)){ cout << "Error in opening gripper\n"; return; }
         goalPos[6] = sqrt(pow(brickPickUp[0]-in1[0],2)+pow(brickPickUp[1]-in1[1],2)+pow(brickPickUp[2]+0.21-in1[2],2))/velLmt*1000; // calculate time // 0.21 is height above brick pickup
@@ -899,14 +899,20 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
         // Wait for brick to be ready from ABB
         msg[0] = 'w';
         while(msg[0]!='d'){
+            if(kbhit()){ // manual input
+                cout << "\nmanual input\n";
+                cin >> tmp;
+                if(tmp == 'd'){msg[0]='d'; cout << "Brick is ready from ABB :) \n"; break;}
+            }
             Status = WaitCommEvent(hComm, &dwEventMask, NULL); // wait till brick is ready from ABB
-            if (Status == false){ cout << "Error in setting WaitCommEvent()\n"; quitType = 'q'; return; }
+            if (Status == false){ cout << "Error in setting WaitCommEvent()\n";} //quitType = 'q'; return; }
             else {
                 ReadFile(hComm, &tmp, sizeof(tmp), &BytesRead, NULL);
                 msg[0] = tmp;
                 cout << msg[0] << ";";
                 if(msg[0]=='d'){ cout << "Brick is ready from ABB :) \n"; }
             }
+            
         }
         // fall and pick up brick
         brickPickUp[6] = safeT*1.2;
@@ -926,7 +932,7 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
         goalPos[2] += 0.14;
         goalPos[6] = safeT;
         if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; } // raise the brick from robot arm
-        Sleep(500); // Wait for ABB to leave
+        Sleep(50); // Wait for ABB to leave
         if(showAttention) { cout << "Going to building level\n"; }
         rotationG = brickPos[i][3] * 11.26666;; // conversion from angle to motor command
         if(packetHandler->write4ByteTxRx(portHandler, DXL1_ID, ADDR_GOAL_POSITION, rotationG, &dxl_error)){ cout << "Error in rotating gripper\n"; return; }
@@ -950,7 +956,7 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
         goalPos[6] = safeT;
         if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; }
         if(packetHandler->write2ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_CURRENT, gpOpen, &dxl_error)){ cout << "Error in opening gripper\n"; return; }
-        Sleep(500); //Wait a while after placing brick
+        Sleep(200); //Wait a while after placing brick
         
         // Rise and leave building area, stand by for next brick pick up
         if(showAttention) { cout << "Going to stand by position\n"; }
@@ -974,7 +980,7 @@ void ReverseBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOf
     double brickDropOff[7] = {0.72, 2.14, 1.9, 0, 0, 0, 10}; // !!!! Define the brick drop off point !!!!, the last digit is a dummy number for time duration. // rotation 165 for drop off
     double safePt[3] = {1.6, 1.8, 2.05}; // a safe area near the drop off
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
-    double velLmt = 0.10; // meters per second
+    double velLmt = 0.15; // meters per second
     double safeT = 1200; // in ms, time to raise to safety height
     double safeH = 0.08; // meter, safety height from building brick level
     double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as target BrkLvl
@@ -983,8 +989,8 @@ void ReverseBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOf
     // Go through the given bricks
     for (int i = brickPos.size()-1; i > -1; i--) {
         // Check if rails need to be raised
-        if(ScaleBrkLvl(brickPos[i][2] - 0.04) != currentBrkLvl){
-            currentBrkLvl = ScaleBrkLvl(brickPos[i][2] - 0.04); // Offset one brick height from building levei, ie 0.04m
+        if(ScaleRailLvl(brickPos[i][2] - 0.04) != currentBrkLvl){
+            currentBrkLvl = ScaleRailLvl(brickPos[i][2] - 0.04); // Offset one brick height from building levei, ie 0.04m
             if(RaiseRailTo(currentBrkLvl) < 0) { cout << "Trajectory aborted.\n"; return; } // raise rail to the building brick level
         }
 
@@ -1054,7 +1060,7 @@ void ReverseBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOf
 
 void RunDemoTraj(const dynamixel::GroupSyncRead &groupSyncRead, bool showAttention){ 
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
-    const double velLmt = 0.09; // meters per second
+    const double velLmt = 0.15; // meters per second
     const double safeT = 1500; // in ms, time to raise to safety height
     const double safeH = 0.08; // meter, safety height from building brick level
     double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as target BrkLvl
@@ -1065,8 +1071,8 @@ void RunDemoTraj(const dynamixel::GroupSyncRead &groupSyncRead, bool showAttenti
     // Go through the given bricks
     for (int i = 0; i < brickPos.size(); i++) {
         // Check if rails need to be raised
-        if(ScaleBrkLvl(brickPos[i][2] - 0.04) != currentBrkLvl){
-            currentBrkLvl = ScaleBrkLvl(brickPos[i][2] - 0.04); // Offset one brick height from building levei, ie 0.04m
+        if(ScaleRailLvl(brickPos[i][2] - 0.04) != currentBrkLvl){
+            currentBrkLvl = ScaleRailLvl(brickPos[i][2] - 0.04); // Offset one brick height from building levei, ie 0.04m
             if(RaiseRailTo(currentBrkLvl) < 0) { cout << "Trajectory aborted.\n"; return; } // raise rail to the building brick level
         }
 
@@ -1282,9 +1288,11 @@ bool ReadBricksFile(){ // Define which file to read here !!!
                 row.push_back(stod(word)); // convert string to double stod()
             }
             for(int i=0; i<3; i++){ row[i] /= 1000; } // convert mm to m unit for xyz
-            row[2] *=1.01; // actual scale of bricks
-            row[3] += 90; // convert Adam's file to robot rotation, 90deg offset
-            if(row[3]<0){ row[3] += 180; } // convert -ve rotation to +ve
+            row[2] *= 1.01; // actual scale of bricks
+            row[3] *= -1; // convert Adam's file from anticlockwise to clockwise in gripper
+            //row[3] += 90; // convert Adam's file to robot rotation, 90deg offset
+            if(row[3]>180){ row[3] -= 180; } // convert 360 degs to 180
+            // else if(row[3]<0){ row[3] += 180; } // convert -ve rotation to +ve
             brickPos.push_back(row);
         }
         cout << "Completed reading brick position input file" << endl;
