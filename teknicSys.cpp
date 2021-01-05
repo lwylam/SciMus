@@ -505,6 +505,9 @@ int main()
                             row.push_back(stod(word)); // convert string to double stod()
                         }
                         for(int i=0; i<3; i++){ row[i] /= 1000; } // convert mm to m unit for xyz
+                        row[2] *= 1.01; // actual scale of bricks
+                        row[3] *= -1; // convert Adam's file from anticlockwise to clockwise in gripper
+                        if(row[3]>180){ row[3] -= 180; } // convert 360 degs to 180
                         brickPos.push_back(row);
                     }
                     cout << "Completed reading brick position input file" << endl;
@@ -907,7 +910,6 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
                 cout << msg[0] << ";";
                 if(msg[0]=='d'){ cout << "Brick is ready from ABB :) \n"; }
             }
-            
         }
         // fall and pick up brick
         brickPickUp[6] = safeT*1.2;
@@ -915,8 +917,6 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
         Sleep(600); //////////// FOR TESTING ONYL, delete later!!!!!!!!!!!!!!!!!!
         if(packetHandler->write2ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_CURRENT, gpClose, &dxl_error)){ cout << "Error in closing gripper\n"; return; }
         Sleep(500); // wait for grippper to close
-        // cout << "Waiting for quitType: ";
-        // cin >> quitType;
         Ard_char[0] = 'r'; // Signal arduino to release ABB gripper and hard code waiting
         if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; quitType = 'q'; return; }
         Sleep(7000); // wait for ABB to release gripper???
@@ -1063,7 +1063,7 @@ void ReverseBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOf
 
 void RunDemoTraj(const dynamixel::GroupSyncRead &groupSyncRead, bool showAttention){ 
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
-    const double velLmt = 0.15; // meters per second
+    const double velLmt = 0.12; // meters per second
     const double safeT = 1500; // in ms, time to raise to safety height
     const double safeH = 0.08; // meter, safety height from building brick level
     double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as target BrkLvl
@@ -1083,7 +1083,7 @@ void RunDemoTraj(const dynamixel::GroupSyncRead &groupSyncRead, bool showAttenti
         if(showAttention) { cout << "Going to building level\n"; }
         if(packetHandler->write2ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_CURRENT, gpOpen, &dxl_error)){ cout << "Error in opening gripper\n"; return; }
         copy(in1, in1+2, begin(goalPos));
-        goalPos[2] = brickPos[i][2] + safeH; // brick level, No end effector offset?????
+        goalPos[2] = brickPos[i][2] + endEffOffset + safeH; // brick level, WITH  end effector offset?????
         goalPos[6] = sqrt(pow(goalPos[2]-in1[2],2))/velLmt*1000; // calculate time
         if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; } // raise from current pos to builing level
         
@@ -1123,7 +1123,7 @@ void RunDemoTraj(const dynamixel::GroupSyncRead &groupSyncRead, bool showAttenti
         if(showAttention) { cout << "Going to brick position\n"; }
         goalPos[0] = brickPos[i][0];                       
         goalPos[1] = brickPos[i][1];
-        goalPos[2] = brickPos[i][2] + safeH;
+        goalPos[2] = brickPos[i][2] + endEffOffset + safeH; // With end effector offset
         goalPos[6] = sqrt(pow(goalPos[0]-in1[0],2)+pow(goalPos[1]-in1[1],2))/velLmt*1000;
         if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; }
 
@@ -1295,7 +1295,6 @@ bool ReadBricksFile(){ // Define which file to read here !!!
             row[3] *= -1; // convert Adam's file from anticlockwise to clockwise in gripper
             //row[3] += 90; // convert Adam's file to robot rotation, 90deg offset
             if(row[3]>180){ row[3] -= 180; } // convert 360 degs to 180
-            // else if(row[3]<0){ row[3] += 180; } // convert -ve rotation to +ve
             brickPos.push_back(row);
         }
         cout << "Completed reading brick position input file" << endl;
