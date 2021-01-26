@@ -18,7 +18,7 @@ using namespace sFnd;
 bool SetSerialParams();
 int CheckMotorNetwork();
 int RunParaBlend(double point[7], bool showAttention = false);
-void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset, bool showAttention = false, bool waitForButton = false);
+void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset, bool showAttention = false);
 void ReverseBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset, bool showAttention = false);
 void RunDemoTraj(const dynamixel::GroupSyncRead &groupSyncRead, bool showAttention = false);
 void SendMotorGrp(bool IsTorque = false, bool IsLinearRail = false);
@@ -67,7 +67,7 @@ char ComPortName[] = "\\\\.\\COM33"; // Name of the arduino Serial port(May Chan
 unsigned char tmp, msg[256], Ard_char[] = {'s'};
 
 int main()
-{   
+{     
     //// Open serial port for Arduino
     hComm = CreateFile(ComPortName, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
     if (hComm == INVALID_HANDLE_VALUE){ cout << "Error: " << ComPortName << " cannot be opened.\n"; }
@@ -472,7 +472,52 @@ int main()
                 break;
             case 'b':   // loop through set no. of bricks and wait for user Button input to continue
             case 'B':
-                isButton = true;
+                {quitType = 'r';
+                int loopNum = 6; // Total number of bricks of the two groups to loop, should be even number !!!
+                int listOffset = 683; //Total brick structure number
+                if(!ReadBricksFile()){ continue; } // Read "bricks.csv" 
+                brickPos.erase(brickPos.begin(), brickPos.end()-loopNum); // Only need the last elements
+                vector<vector<double>> A(brickPos.begin(), brickPos.begin()+loopNum/2), B(brickPos.begin()+loopNum/2, brickPos.end()); // Two groups of bricks to switch off
+
+                while(quitType != 'f' && quitType != 'F'){ // if not running the final loop.....
+                    // always start from building complete built, then dissamble some
+                    cout << "...Waiting for button input...\n";
+                    do{
+                        nodeList[0]->Status.RT.Refresh(); // Refresh again to check if button is pushed
+                        if(kbhit()){ // Emergency quit during trajectory control
+                            cout << "\nSystem interrupted!! Do you want to quit the trajectory control?\nq - Quit trajectory\nf - Finish this loop of motion\nr - Resume trajectory\n";
+                            cin >> quitType;
+                        }
+                        if(quitType == 'f' || quitType == 'F'){ break; }
+                    }while(!nodeList[0]->Status.RT.Value().cpm.InA);
+                    // Build set A
+                    brickPos = A;
+                    RunBricksTraj(groupSyncRead, listOffset - loopNum, true);
+                    if(quitType == 'q' || quitType == 'Q'){ break; }
+                    // Remove set B
+                    brickPos = B;
+                    ReverseBricksTraj(groupSyncRead, listOffset - loopNum/2, true);
+                    if(quitType == 'q' || quitType == 'Q'){ break; }
+                    ////////////////////////////////////////////////////////////////////////////////////////////////////
+                    cout << "...Waiting for button input...\n";
+                    do{
+                        nodeList[0]->Status.RT.Refresh(); // Refresh again to check if button is pushed
+                        if(kbhit()){ // Emergency quit during trajectory control
+                            cout << "\nSystem interrupted!! Do you want to quit the trajectory control?\nq - Quit trajectory\nf - Finish this loop of motion\nr - Resume trajectory\n";
+                            cin >> quitType;
+                        }
+                        if(quitType == 'f' || quitType == 'F'){ break; }
+                    }while(!nodeList[0]->Status.RT.Value().cpm.InA);
+                    // Build set B
+                    RunBricksTraj(groupSyncRead, listOffset - loopNum/2, true);
+                    if(quitType == 'q' || quitType == 'Q'){ break; }
+                    // Remove set A
+                    brickPos = A;
+                    ReverseBricksTraj(groupSyncRead, listOffset - loopNum, true);
+                    if(quitType == 'q' || quitType == 'Q'){ break; }
+                }
+                cout << "Quit button looping trajectory.\n";}
+                break;
             case 'l':   // Read brick file, loop through a set no. of bricks
             case 'L':
                 {int loopNum = 5; // Define the no. of bricks to loop here!!!
@@ -488,9 +533,9 @@ int main()
                     // always reverse from a complete built, then rebuild it
                     ReverseBricksTraj(groupSyncRead, listOffset, true);
                     if(quitType == 'q' || quitType == 'Q'){ break; }
-                    RunBricksTraj(groupSyncRead, listOffset, true, isButton);
+                    RunBricksTraj(groupSyncRead, listOffset, true);
                     if(quitType == 'q' || quitType == 'Q'){ break; }
-                    if(quitType != 'f' && !isButton){
+                    if(quitType != 'f'){
                         cout << "Taking a 3 minute rest~ ^O^\n\n";
                         Sleep(1000*180);
                     }
@@ -864,12 +909,12 @@ double ScaleRailLvl(double brickLvl){
     return output;
 }
 
-void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset, bool showAttention, bool waitForButton){
+void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset, bool showAttention){
     // 0.75 0.865 1.6 p10 //{0.6723, 1.3195, 1.4611
     double brickPickUp[7] = {0.76, 0.85978, 1.595, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!, the last digit is a dummy number for time duration.
     double safePt[3] = {1.5, 1.37, 1.65}; // a safe area near to the arm // 0.21 safe height from ABB
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
-    double velLmt = 0.12; // meters per second
+    double velLmt = 0.14; // meters per second
     double safeT = 1200; // in ms, time to raise to safety height
     double safeH = 0.08; // meter, safety height from building brick level
     double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as target BrkLvl
@@ -904,11 +949,11 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
         // Wait for brick to be ready from ABB
         msg[0] = 'w';
         while(msg[0]!='d'){
-            if(kbhit()){ // manual input
-                cout << "\nmanual input\n";
-                cin >> tmp;
-                if(tmp == 'd'){msg[0]='d'; cout << "Brick is ready from ABB :) \n"; break;}
-            }
+            // if(kbhit()){ // manual input
+            //     cout << "\nmanual input\n";
+            //     cin >> tmp;
+            //     if(tmp == 'd'){msg[0]='d'; cout << "Brick is ready from ABB :) \n"; break;}
+            // }
             Status = WaitCommEvent(hComm, &dwEventMask, NULL); // wait till brick is ready from ABB
             if (Status == false){ cout << "Error in setting WaitCommEvent()\n";} //quitType = 'q'; return; }
             else {
@@ -971,16 +1016,6 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
         
         cout << "IN: "<< in1[0] << " " << in1[1] << " " << in1[2] << " " << in1[3] << " " << in1[4] << " " << in1[5] << railOffset << endl;
         cout << "----------Completed brick #" << i + 1 + listOffset <<"----------" << endl;
-        if(waitForButton){
-            // After brick #1 and 4, wait for button input (InA), unless for "finish this loop" quitType.
-            if(i == 1 || i == 4){ 
-                cout << "...Waiting for button input...\n";
-                while(!nodeList[0]->Status.RT.Value().cpm.InA){
-                    nodeList[0]->Status.RT.Refresh(); // Refresh again to check if button is pushed
-                    if(quitType == 'f' || quitType == 'F'){ break; }
-                }
-            } 
-        }
     }
     packetHandler->write2ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_CURRENT, 0, &dxl_error);
     copy(home, home+3, begin(goalPos));
@@ -992,7 +1027,7 @@ void ReverseBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOf
     double brickDropOff[7] = {0.72, 2.14, 1.9, 0, 0, 0, 10}; // !!!! Define the brick drop off point !!!!, the last digit is a dummy number for time duration. // rotation 165 for drop off
     double safePt[3] = {1.6, 1.8, 2.05}; // a safe area near the drop off
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
-    double velLmt = 0.12; // meters per second
+    double velLmt = 0.16; // meters per second
     double safeT = 1200; // in ms, time to raise to safety height
     double safeH = 0.08; // meter, safety height from building brick level
     double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as target BrkLvl
