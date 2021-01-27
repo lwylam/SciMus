@@ -40,7 +40,7 @@ const double RAIL_UP = 1.25, RAIL_DOWN = 0; // Linear rail upper and lower bound
 const double endEffOffset = -0.125; // meters, offset from endeffector to ground
 double step = 0.01; // in meters, for manual control
 float targetTorque = -2.5; // in %, -ve for tension, also need to UPDATE in switch case 't'!!!!!!!!!
-const int MILLIS_TO_NEXT_FRAME = 35; // note the basic calculation time is abt 16ms
+const int MILLIS_TO_NEXT_FRAME = 35, UserInput_Sec_Timeout = 15, SleepTime = 19; // note the basic calculation time is abt 16ms; sleep-time in 24 hr
 double home[6] = {1.5, 1.5, 1.4, 0, 0, 0}; // home posisiton
 double offset[12]; // L0, from "zero position", will be updated by "set home" command
 double railOffset = 0.776; // linear rails offset
@@ -96,7 +96,12 @@ int main()
     try{
         do {
             bool allDone = false, stabilized = false;
-            cin >> cmd;
+            time_t now = time(0); time_t timeout = now + UserInput_Sec_Timeout; cmd = 'u'; // default value
+            while(now < timeout){
+                Sleep(50);
+                now = time(0);
+                if(kbhit()){ cin >> cmd; break; }
+            }
             switch (cmd){
                 case 'i':   // Show menu
                     cout << "Pick from menu for the next action:\nt - Tighten cables with Torque mode\ny - Loose the cables\ns - Set current position as home\nh - Move to Home\n8 - Manually adjust cable lengths\nl - Linear rails motions\nu - Update current position from external file\nr - Reset Rotation to zero\ni - Info: show menu\nn - Move on to Next step\n";
@@ -266,6 +271,14 @@ int main()
                         }
                         cout << endl;
                         cout << "Linear rail offset: " << railOffset << endl;
+                        
+                        now = time(0); timeout = now + UserInput_Sec_Timeout; cout << "!! If no input detected in " << UserInput_Sec_Timeout << " sec, programme will enter next section. !!" << endl;
+                        cmd = 'n'; // default value to move on to next section
+                        while(now < timeout){
+                            Sleep(50);
+                            now = time(0);
+                            if(kbhit()){ cin >> cmd; break; }
+                        }
                     }
                     break;
             }
@@ -328,8 +341,12 @@ int main()
     //// Read input .txt file
     cout << "Choose from menu for cable robot motion:\nt - Read from \"bricks.csv\" file for brick positions\nl - Loop through set num of bricks\nb - Loop and wait for Button input\nm - Manual input using w,a,s,d,r,f,v,g\nd - Run Demo loop\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
     do {
-        bool isButton = false;
-        cin >> cmd;
+        tm *fn; time_t now = time(0); time_t timeout = now + UserInput_Sec_Timeout; cmd = 'b'; // default value for button loop
+        while(now < timeout){
+            Sleep(50);
+            now = time(0);
+            if(kbhit()){ cin >> cmd; break; }
+        }
         switch (cmd){
             case 'i':    // Show menu
                 cout << "Choose from menu for cable robot motion:\nt - Read from \"bricks.csv\" file for brick positions\nl - Loop through set num of bricks\nb - Loop and wait for Button input\nm - Manual input using w,a,s,d,r,f,v,g\nd - Run Demo loop\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
@@ -487,9 +504,11 @@ int main()
                         if(kbhit()){ // Emergency quit during trajectory control
                             cout << "\nSystem interrupted!! Do you want to quit the trajectory control?\nq - Quit trajectory\nf - Finish this loop of motion\nr - Resume trajectory\n";
                             cin >> quitType;
+                            break;
                         }
-                        if(quitType == 'f' || quitType == 'F'){ break; }
+                        now = time(0); fn = localtime(&now); if(fn->tm_hour >= SleepTime) { continue; } // Quit button loop directly after sleep time
                     }while(!nodeList[0]->Status.RT.Value().cpm.InA);
+                    if(quitType == 'f' || quitType == 'F'){ break; }
                     // Build set A
                     brickPos = A;
                     RunBricksTraj(groupSyncRead, listOffset - loopNum, true);
@@ -504,9 +523,9 @@ int main()
                         nodeList[0]->Status.RT.Refresh(); // Refresh again to check if button is pushed
                         if(kbhit()){ // Emergency quit during trajectory control
                             cout << "\nSystem interrupted!! Do you want to quit the trajectory control?\nq - Quit trajectory\nf - Finish this loop of motion\nr - Resume trajectory\n";
-                            cin >> quitType;
+                            cin >> quitType; break;
                         }
-                        if(quitType == 'f' || quitType == 'F'){ break; }
+                        now = time(0); fn = localtime(&now); if(fn->tm_hour >= SleepTime) { quitType = 'f'; break; } // Quit button loop directly after sleep time
                     }while(!nodeList[0]->Status.RT.Value().cpm.InA);
                     // Build set B
                     RunBricksTraj(groupSyncRead, listOffset - loopNum/2, true);
@@ -535,6 +554,7 @@ int main()
                     if(quitType == 'q' || quitType == 'Q'){ break; }
                     RunBricksTraj(groupSyncRead, listOffset, true);
                     if(quitType == 'q' || quitType == 'Q'){ break; }
+                    now = time(0); fn = localtime(&now); if(fn->tm_hour >= SleepTime) { break; } // quit loop after sleep time
                     if(quitType != 'f'){
                         cout << "Taking a 3 minute rest~ ^O^\n\n";
                         Sleep(1000*180);
@@ -581,6 +601,8 @@ int main()
                 cout << "Quit looping demo trajectory.\n";
                 break;
         }
+        now = time(0); fn = localtime(&now);
+        if(fn->tm_hour >= SleepTime) { cout << "\nATTENTION: Exhibit closing time. Thank you!\n" << endl; cmd = 'n'; }
     } while(cmd != 'n');
 
     //// Safe system shut down, safe last pos and emegency shut down
@@ -1241,7 +1263,7 @@ void SendMotorGrp(bool IsTorque, bool IsLinearRail){
 }
 
 void TrjHome(){// !!! Define the task space velocity limit for homing !!!
-    double velLmt = 0.05; // unit in meters per sec
+    double velLmt = 0.1; // unit in meters per sec
     double dura = sqrt(pow(in1[0]-home[0],2)+pow(in1[1]-home[1],2)+pow(in1[2]-home[2],2))/velLmt*1000; // *1000 to change unit to ms
     double t = 0;
     cout << "Expected homing duration: " << dura <<"ms\n";
