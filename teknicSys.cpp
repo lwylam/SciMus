@@ -18,7 +18,7 @@ using namespace sFnd;
 bool SetSerialParams();
 int CheckMotorNetwork();
 int RunParaBlend(double point[7], bool showAttention = false);
-void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset, bool showAttention = false);
+void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset, bool showAttention = false, bool waitBtn = false);
 void ReverseBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset, bool showAttention = false);
 void RunDemoTraj(const dynamixel::GroupSyncRead &groupSyncRead, bool showAttention = false);
 void SendMotorGrp(bool IsTorque = false, bool IsLinearRail = false);
@@ -341,6 +341,7 @@ int main()
     //// Read input .txt file
     cout << "Choose from menu for cable robot motion:\nt - Read from \"bricks.csv\" file for brick positions\nl - Loop through set num of bricks\nb - Loop and wait for Button input\nm - Manual input using w,a,s,d,r,f,v,g\nd - Run Demo loop\ni - Info: show menu\nn - Prepare to disable motors and exit programme" << endl;
     do {
+        bool waitBtn = false;
         tm *fn; time_t now = time(0); time_t timeout = now + UserInput_Sec_Timeout; cmd = 'b'; // default value for button loop
         while(now < timeout){
             Sleep(50);
@@ -489,7 +490,7 @@ int main()
                 break;
             case 'b':   // loop through set no. of bricks and wait for user Button input to continue
             case 'B':
-                {quitType = 'r';
+                /*{quitType = 'r';
                 int loopNum = 6; // Total number of bricks of the two groups to loop, should be even number !!!
                 int listOffset = 683; //Total brick structure number
                 if(!ReadBricksFile()){ continue; } // Read "bricks.csv" 
@@ -506,7 +507,7 @@ int main()
                             cin >> quitType;
                             break;
                         }
-                        now = time(0); fn = localtime(&now); if(fn->tm_hour >= SleepTime) { continue; } // Quit button loop directly after sleep time
+                        now = time(0); fn = localtime(&now); if(fn->tm_hour >= SleepTime) { quitType = 'f'; continue; } // Quit button loop directly after sleep time
                     }while(!nodeList[0]->Status.RT.Value().cpm.InA);
                     if(quitType == 'f' || quitType == 'F'){ break; }
                     // Build set A
@@ -536,10 +537,11 @@ int main()
                     if(quitType == 'q' || quitType == 'Q'){ break; }
                 }
                 cout << "Quit button looping trajectory.\n";}
-                break;
+                break;*/
+                waitBtn = true;
             case 'l':   // Read brick file, loop through a set no. of bricks
             case 'L':
-                {int loopNum = 5; // Define the no. of bricks to loop here!!!
+                {int loopNum = 6; // Define the no. of bricks to loop here!!!
                 // Read input file for traj-gen
                 quitType = 'r';
                 if(!ReadBricksFile()){ continue; } // Read "bricks.csv"
@@ -552,10 +554,10 @@ int main()
                     // always reverse from a complete built, then rebuild it
                     ReverseBricksTraj(groupSyncRead, listOffset, true);
                     if(quitType == 'q' || quitType == 'Q'){ break; }
-                    RunBricksTraj(groupSyncRead, listOffset, true);
+                    RunBricksTraj(groupSyncRead, listOffset, true, waitBtn);
                     if(quitType == 'q' || quitType == 'Q'){ break; }
                     now = time(0); fn = localtime(&now); if(fn->tm_hour >= SleepTime) { break; } // quit loop after sleep time
-                    if(quitType != 'f'){
+                    if(quitType != 'f' && !waitBtn){
                         cout << "Taking a 3 minute rest~ ^O^\n\n";
                         Sleep(1000*180);
                     }
@@ -931,7 +933,7 @@ double ScaleRailLvl(double brickLvl){
     return output;
 }
 
-void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset, bool showAttention){
+void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset, bool showAttention, bool waitBtn){
     // 0.75 0.865 1.6 p10 //{0.6723, 1.3195, 1.4611
     double brickPickUp[7] = {0.76, 0.85978, 1.595, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!, the last digit is a dummy number for time duration.
     double safePt[3] = {1.5, 1.37, 1.65}; // a safe area near to the arm // 0.21 safe height from ABB
@@ -948,6 +950,19 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
         if(ScaleRailLvl(brickPos[i][2] - 0.04) != currentBrkLvl){
             currentBrkLvl = ScaleRailLvl(brickPos[i][2] - 0.0404); // Offset one brick height from building levei, ie 0.0404m
             if(RaiseRailTo(currentBrkLvl) < 0) { cout << "Trajectory aborted.\n"; return; } // raise rail to the building brick level
+        }
+
+        // Wait for button input before builing a brick
+        if(waitBtn && quitType != 'f'){
+            cout << "...Waiting for button input...\n";
+            do{
+                nodeList[0]->Status.RT.Refresh(); // Refresh again to check if button is pushed
+                if(kbhit()){ // Emergency quit during trajectory control
+                    cout << "\nSystem interrupted!! Do you want to quit the trajectory control?\nq - Quit trajectory\nf - Finish this loop of motion\nr - Resume trajectory\n";
+                    cin >> quitType; break;
+                }
+                time_t now = time(0); tm *fn = localtime(&now); if(fn->tm_hour >= SleepTime) { quitType = 'f'; break; } // Quit button loop directly after sleep time
+            }while(!nodeList[0]->Status.RT.Value().cpm.InA);
         }
 
         // Update index file for grasshopper display
@@ -1043,6 +1058,7 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
     copy(home, home+3, begin(goalPos));
     goalPos[6] = sqrt(pow(goalPos[0]-in1[0],2)+pow(goalPos[1]-in1[1],2)+pow(goalPos[2]-in1[2],2))/velLmt*1000;
     if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; } // home after building all
+    cout << "Photo time~~\n"; Sleep(3000);
 }
 
 void ReverseBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset, bool showAttention){
