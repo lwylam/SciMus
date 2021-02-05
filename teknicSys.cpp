@@ -40,7 +40,7 @@ const double RAIL_UP = 1.25, RAIL_DOWN = 0; // Linear rail upper and lower bound
 const double endEffOffset = -0.125; // meters, offset from endeffector to ground
 double step = 0.01; // in meters, for manual control
 float targetTorque = -2.5; // in %, -ve for tension, also need to UPDATE in switch case 't'!!!!!!!!!
-const int MILLIS_TO_NEXT_FRAME = 35, UserInput_Sec_Timeout = 15, SleepTime = 19; // note the basic calculation time is abt 16ms; sleep-time in 24 hr
+const int MILLIS_TO_NEXT_FRAME = 35, UserInput_Sec_Timeout = 15, SleepTime = 21; // note the basic calculation time is abt 16ms; sleep-time in 24 hr
 double home[6] = {1.5, 1.5, 1.4, 0, 0, 0}; // home posisiton
 double offset[12]; // L0, from "zero position", will be updated by "set home" command
 double railOffset = 0.776; // linear rails offset
@@ -946,6 +946,8 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
     
     // Go through the given bricks
     for (int i = 0; i < brickPos.size(); i++) {
+        ofstream myfile;
+
         // Check if rails need to be raised
         if(ScaleRailLvl(brickPos[i][2] - 0.04) != currentBrkLvl){
             currentBrkLvl = ScaleRailLvl(brickPos[i][2] - 0.0404); // Offset one brick height from building levei, ie 0.0404m
@@ -955,6 +957,9 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
         // Wait for button input before builing a brick
         if(waitBtn && quitType != 'f'){
             cout << "...Waiting for button input...\n";
+            myfile.open ("indexBrk.txt");
+            myfile << -2; // attraction screen
+            myfile.close();
             do{
                 nodeList[0]->Status.RT.Refresh(); // Refresh again to check if button is pushed
                 if(kbhit()){ // Emergency quit during trajectory control
@@ -966,7 +971,6 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
         }
 
         // Update index file for grasshopper display
-        ofstream myfile;
         myfile.open ("indexBrk.txt");
         myfile << i + 1 + listOffset;
         myfile.close();
@@ -1065,11 +1069,16 @@ void ReverseBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOf
     double brickDropOff[7] = {0.72, 2.14, 1.9, 0, 0, 0, 10}; // !!!! Define the brick drop off point !!!!, the last digit is a dummy number for time duration. // rotation 165 for drop off
     double safePt[3] = {1.6, 1.8, 2.05}; // a safe area near the drop off
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
-    double velLmt = 0.16; // meters per second
+    double velLmt = 0.28; // meters per second
     double safeT = 1200; // in ms, time to raise to safety height
     double safeH = 0.08; // meter, safety height from building brick level
     double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as target BrkLvl
     double dura = 0;
+
+    ofstream myfile;
+    myfile.open ("indexBrk.txt");
+    myfile << -1; // -1 for disassembly
+    myfile.close();
     
     // Go through the given bricks
     for (int i = brickPos.size()-1; i > -1; i--) {
@@ -1080,10 +1089,10 @@ void ReverseBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOf
         }
 
         // Update index file for grasshopper display
-        ofstream myfile;
-        myfile.open ("indexBrk.txt");
-        myfile << i + 1 + listOffset;
-        myfile.close();
+        // ofstream myfile;
+        // myfile.open ("indexBrk.txt");
+        // myfile << i + 1 + listOffset;
+        // myfile.close();
 
         // Go to building level
         if(showAttention) { cout << "Going to building level\n"; }
