@@ -43,7 +43,7 @@ float targetTorque = -2.5; // in %, -ve for tension, also need to UPDATE in swit
 const int MILLIS_TO_NEXT_FRAME = 35, UserInput_Sec_Timeout = 15, SleepTime = 21; // note the basic calculation time is abt 16ms; sleep-time in 24 hr
 double home[6] = {1.5, 1.5, 1.4, 0, 0, 0}; // home posisiton
 double offset[12]; // L0, from "zero position", will be updated by "set home" command
-double railOffset = 0.776; // linear rails offset
+double railOffset = 0.969599; // linear rails offset
 double in1[6] = {1.5, 1.5, 1.4, 0, 0, 0};
 double out1[12] = {2.87451, 2.59438, 2.70184, 2.40053, 2.46908, 2.15523, 2.65123, 2.35983, 0, 0, 0, 0}; // assume there are 8 motors + 4 linear rails
 double a[6], b[6], c[6], d[6], e[6], f[6], g[6], tb[6]; // trajectory coefficients
@@ -556,6 +556,7 @@ int main()
                     if(quitType == 'q' || quitType == 'Q'){ break; }
                     RunBricksTraj(groupSyncRead, listOffset, true, waitBtn);
                     if(quitType == 'q' || quitType == 'Q'){ break; }
+                    loopCount += 1;
                     now = time(0); fn = localtime(&now); if(fn->tm_hour >= SleepTime) { break; } // quit loop after sleep time
                     if(quitType != 'f' && !waitBtn){
                         cout << "Taking a 3 minute rest~ ^O^\n\n";
@@ -618,6 +619,10 @@ int main()
         n->Motion.PosnMeasured.Refresh();
         myfile << n->Motion.PosnMeasured.Value() << " ";
     }
+    myfile.close();
+    tm *fn; time_t now = time(0); fn = localtime(&now);
+    myfile.open("log.txt", ios::app);
+    myfile <<  fn->tm_mon +1 << "/" << fn->tm_mday << ": " << loopCount << " runs" << endl;
     myfile.close();
     
     //// List of what-if-s??
@@ -935,7 +940,7 @@ double ScaleRailLvl(double brickLvl){
 
 void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset, bool showAttention, bool waitBtn){
     // 0.75 0.865 1.6 p10 //{0.6723, 1.3195, 1.4611
-    double brickPickUp[7] = {0.76, 0.85978, 1.595, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!, the last digit is a dummy number for time duration.
+    double brickPickUp[7] = {0.757, 0.8643, 1.592, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!, the last digit is a dummy number for time duration.
     double safePt[3] = {1.5, 1.37, 1.65}; // a safe area near to the arm // 0.21 safe height from ABB
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
     double velLmt = 0.14; // meters per second
@@ -979,7 +984,7 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
         if(showAttention) { cout << "Picking up a brick\n"; }
         Ard_char[0] = 'g'; // Signal arduino to release ABB gripper and hard code waiting
         if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; quitType = 'q'; return; }
-        if(packetHandler->write4ByteTxRx(portHandler, DXL1_ID, ADDR_GOAL_POSITION, 80, &dxl_error)){ cout << "Error in rotating gripper\n"; return; } //////////////////80 is 7 deg
+        if(packetHandler->write4ByteTxRx(portHandler, DXL1_ID, ADDR_GOAL_POSITION, 114, &dxl_error)){ cout << "Error in rotating gripper\n"; return; } //////////////////114 is 10 deg
         Sleep(10); // short break between RS-485 communication
         if(packetHandler->write2ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_CURRENT, gpOpen, &dxl_error)){ cout << "Error in opening gripper\n"; return; }
         goalPos[6] = sqrt(pow(brickPickUp[0]-in1[0],2)+pow(brickPickUp[1]-in1[1],2)+pow(brickPickUp[2]+0.21-in1[2],2))/velLmt*1000; // calculate time // 0.21 is height above brick pickup
@@ -1004,14 +1009,33 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
                 if(msg[0]=='d'){ cout << "Brick is ready from ABB :) \n"; }
             }
         }
+        
         // fall and pick up brick
         brickPickUp[6] = safeT*1.2;
         if(RunParaBlend(brickPickUp) < 0) { cout << "Trajectory aborted.\n"; return; } // Go pick up
         Sleep(600); //////////// FOR TESTING ONYL, delete later!!!!!!!!!!!!!!!!!!
         if(packetHandler->write2ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_CURRENT, gpClose, &dxl_error)){ cout << "Error in closing gripper\n"; return; }
-        Sleep(500); // wait for grippper to close
+        Sleep(800); // wait for grippper to close
         Ard_char[0] = 'r'; // Signal arduino to release ABB gripper and hard code waiting
         if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; quitType = 'q'; return; }
+        
+        // Wait till brick is released from ABB
+        int overtime = 0; Ard_char[0] = 'o'; // Hard code signal arduino to open ABB gripper
+        // while(msg[0]!='o'){
+        //     Status = WaitCommEvent(hComm, &dwEventMask, NULL);
+        //     if (Status == false){ cout << "Error in setting WaitCommEvent()\n";} //quitType = 'q'; return; }
+        //     else {
+        //         ReadFile(hComm, &tmp, sizeof(tmp), &BytesRead, NULL);
+        //         overtime++;
+        //         msg[0] = tmp;
+        //         cout << msg[0] << ";";
+        //         if(!(overtime%40)){ // Send extra "o" command to ABB gripper if "o" reply is not recieved
+        //             cout << " Waiting... send 'o' command\n";
+        //             if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; quitType = 'q'; return; }
+        //         } 
+        //         if(msg[0]=='o'){ cout << "--------- released brick from ABB \\./--------- \n"; }
+        //     }
+        // }
         Sleep(7000); // wait for ABB to release gripper??? // fastest 7000
 
         // Go to building level
