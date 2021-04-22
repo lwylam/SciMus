@@ -49,7 +49,7 @@ double out1[12] = {2.87451, 2.59438, 2.70184, 2.40053, 2.46908, 2.15523, 2.65123
 double a[6], b[6], c[6], d[6], e[6], f[6], g[6], tb[6]; // trajectory coefficients
 char limitType = 'C'; // A for home, B for limits, C for default
 char quitType = 'r'; // q for emergency quit, f for finish traj, r for resume/default
-int loopCount = 0;
+int loopCount = 0, abbCount = 0; // log info for loop numbers and error occurs daily
 
 dynamixel::PortHandler *portHandler;
 dynamixel::PacketHandler *packetHandler;
@@ -490,54 +490,6 @@ int main()
                 break;
             case 'b':   // loop through set no. of bricks and wait for user Button input to continue
             case 'B':
-                /*{quitType = 'r';
-                int loopNum = 6; // Total number of bricks of the two groups to loop, should be even number !!!
-                int listOffset = 683; //Total brick structure number
-                if(!ReadBricksFile()){ continue; } // Read "bricks.csv" 
-                brickPos.erase(brickPos.begin(), brickPos.end()-loopNum); // Only need the last elements
-                vector<vector<double>> A(brickPos.begin(), brickPos.begin()+loopNum/2), B(brickPos.begin()+loopNum/2, brickPos.end()); // Two groups of bricks to switch off
-
-                while(quitType != 'f' && quitType != 'F'){ // if not running the final loop.....
-                    // always start from building complete built, then dissamble some
-                    cout << "...Waiting for button input...\n";
-                    do{
-                        nodeList[0]->Status.RT.Refresh(); // Refresh again to check if button is pushed
-                        if(kbhit()){ // Emergency quit during trajectory control
-                            cout << "\nSystem interrupted!! Do you want to quit the trajectory control?\nq - Quit trajectory\nf - Finish this loop of motion\nr - Resume trajectory\n";
-                            cin >> quitType;
-                            break;
-                        }
-                        now = time(0); fn = localtime(&now); if(fn->tm_hour >= SleepTime) { quitType = 'f'; continue; } // Quit button loop directly after sleep time
-                    }while(!nodeList[0]->Status.RT.Value().cpm.InA);
-                    if(quitType == 'f' || quitType == 'F'){ break; }
-                    // Build set A
-                    brickPos = A;
-                    RunBricksTraj(groupSyncRead, listOffset - loopNum, true);
-                    if(quitType == 'q' || quitType == 'Q'){ break; }
-                    // Remove set B
-                    brickPos = B;
-                    ReverseBricksTraj(groupSyncRead, listOffset - loopNum/2, true);
-                    if(quitType == 'q' || quitType == 'Q'){ break; }
-                    ////////////////////////////////////////////////////////////////////////////////////////////////////
-                    cout << "...Waiting for button input...\n";
-                    do{
-                        nodeList[0]->Status.RT.Refresh(); // Refresh again to check if button is pushed
-                        if(kbhit()){ // Emergency quit during trajectory control
-                            cout << "\nSystem interrupted!! Do you want to quit the trajectory control?\nq - Quit trajectory\nf - Finish this loop of motion\nr - Resume trajectory\n";
-                            cin >> quitType; break;
-                        }
-                        now = time(0); fn = localtime(&now); if(fn->tm_hour >= SleepTime) { quitType = 'f'; break; } // Quit button loop directly after sleep time
-                    }while(!nodeList[0]->Status.RT.Value().cpm.InA);
-                    // Build set B
-                    RunBricksTraj(groupSyncRead, listOffset - loopNum/2, true);
-                    if(quitType == 'q' || quitType == 'Q'){ break; }
-                    // Remove set A
-                    brickPos = A;
-                    ReverseBricksTraj(groupSyncRead, listOffset - loopNum, true);
-                    if(quitType == 'q' || quitType == 'Q'){ break; }
-                }
-                cout << "Quit button looping trajectory.\n";}
-                break;*/
                 waitBtn = true;
             case 'l':   // Read brick file, loop through a set no. of bricks
             case 'L':
@@ -622,7 +574,7 @@ int main()
     myfile.close();
     tm *fn; time_t now = time(0); fn = localtime(&now);
     myfile.open("log.txt", ios::app);
-    myfile <<  fn->tm_mon +1 << "/" << fn->tm_mday << ": " << loopCount << " runs" << endl;
+    myfile <<  fn->tm_mon +1 << "/" << fn->tm_mday << ": " << loopCount << " loop runs. ABB error hard-code call: " << abbCount << endl;
     myfile.close();
     
     //// List of what-if-s??
@@ -839,7 +791,7 @@ int RunParaBlend(double point[7], bool showAttention){
     double unitV = sqrt(pow(point[0]-in1[0],2)+pow(point[1]-in1[1],2)+pow(point[2]-in1[2],2)); // the root to divide by to get unit vector
     cout << "Will run for " << dura << "ms...\n";
     if(dura <= 200){ return 0; } // Don't run traj for incorrect timing 
-    
+
     // Solve parabolic blend coefficients for each DoF
     for(int i = 0; i < 6; i++){
         sQ[i] = in1[i]; // start point, from current position
@@ -948,10 +900,10 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
     double safeH = 0.08; // meter, safety height from building brick level
     double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as target BrkLvl
     double dura = 0;
-    
+
     // Go through the given bricks
     for (int i = 0; i < brickPos.size(); i++) {
-        ofstream myfile;
+        ofstream myfile; int timeout_i = 0;
 
         // Check if rails need to be raised
         if(ScaleRailLvl(brickPos[i][2] - 0.04) != currentBrkLvl){
@@ -1020,23 +972,48 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
         if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; quitType = 'q'; return; }
         
         // Wait till brick is released from ABB
-        int overtime = 0; Ard_char[0] = 'o'; // Hard code signal arduino to open ABB gripper
-        // while(msg[0]!='o'){
-        //     Status = WaitCommEvent(hComm, &dwEventMask, NULL);
-        //     if (Status == false){ cout << "Error in setting WaitCommEvent()\n";} //quitType = 'q'; return; }
-        //     else {
-        //         ReadFile(hComm, &tmp, sizeof(tmp), &BytesRead, NULL);
-        //         overtime++;
-        //         msg[0] = tmp;
-        //         cout << msg[0] << ";";
-        //         if(!(overtime%40)){ // Send extra "o" command to ABB gripper if "o" reply is not recieved
-        //             cout << " Waiting... send 'o' command\n";
-        //             if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; quitType = 'q'; return; }
-        //         } 
-        //         if(msg[0]=='o'){ cout << "--------- released brick from ABB \\./--------- \n"; }
-        //     }
-        // }
-        Sleep(7000); // wait for ABB to release gripper??? // fastest 7000
+        int msgCnt = 0; Ard_char[0] = 'o'; // Hard code signal arduino to open ABB gripper
+        Status = WaitCommEvent(hComm, &dwEventMask, NULL); // wait till brick is ready from ABB
+        if (Status == false){ cout << "Error in setting WaitCommEvent()\n";} //quitType = 'q'; return; }
+        else {
+            do{
+                ReadFile(hComm, &tmp, sizeof(tmp), &BytesRead, NULL);
+                msg[msgCnt] = tmp;
+                if(tmp == 'o'){ cout << " -o- Received the gripper opening done signal :) \n"; }
+                if (msgCnt<250){ msgCnt++; }
+                else{
+                    msgCnt = 0; // Restart msg count
+                    timeout_i += 1;
+                    if (!(timeout_i%6)){ // Send hard code open to ABB after some timeout; 20 loops is ard 5 min
+                        Ard_char[0] = 'c'; // Hard code signal arduino to close ABB gripper
+                        if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; quitType = 'q'; return; }
+                        Sleep(3000); // Wait a bit before sending next signal
+                        Ard_char[0] = 'o'; // Hard code signal arduino to close ABB gripper
+                        if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; quitType = 'q'; return; }
+                        cout << "ATTENTION: hard code closing is sent to ABB\n";
+                        abbCount += 1;
+                    }
+                }
+                if(kbhit()){ // Emergency quit during trajectory control
+                    cout << "\nSystem interruption (Waiting for ABB)!! Do you want to quit the trajectory control?\nq - Quit trajectory\nf - Finish this loop of motion\nr - Resume trajectory and Request ABB gripper release\n";
+                    cin >> quitType;
+                    if(quitType == 'q' || quitType == 'Q'){
+                        cout << "Trajectory emergency quit\n";
+                        return;
+                    }
+                    if(quitType == 'r' || quitType == 'R'){
+                        Ard_char[0] = 'c'; // Hard code signal arduino to close ABB gripper
+                        if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; quitType = 'q'; return; }
+                        Sleep(3000); // Wait a bit before sending next signal
+                        Ard_char[0] = 'o'; // Hard code signal arduino to close ABB gripper
+                        if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; quitType = 'q'; return; }
+                        cout << "ATTENTION: hard code closing is sent to ABB\n";
+                        abbCount += 1;
+                    }
+                }
+            } while (tmp != 'o'); // while (BytesRead > 0 && tmp != 'o');
+        }
+        Sleep(7000); // wait for ABB to return stand by pos??? // fastest 7000
 
         // Go to building level
         if(showAttention) { cout << "Raising brick from ABB\n"; }
