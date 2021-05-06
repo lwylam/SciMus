@@ -48,7 +48,7 @@ double in1[6] = {1.5, 1.5, 1.4, 0, 0, 0};
 double out1[12] = {2.87451, 2.59438, 2.70184, 2.40053, 2.46908, 2.15523, 2.65123, 2.35983, 0, 0, 0, 0}; // assume there are 8 motors + 4 linear rails
 double a[6], b[6], c[6], d[6], e[6], f[6], g[6], tb[6]; // trajectory coefficients
 char limitType = 'C'; // A for home, B for limits, C for default
-char quitType = 'r'; // q for emergency quit, f for finish traj, r for resume/default
+char quitType = 'r'; // q for emergency quit, f for finish traj, e for error msg received, r for resume/default
 int loopCount = 0, abbCount = 0; // log info for loop numbers and error occurs daily
 
 dynamixel::PortHandler *portHandler;
@@ -505,9 +505,9 @@ int main()
                 while(quitType != 'f' && quitType != 'F'){ // if not running the final loop.....
                     // always reverse from a complete built, then rebuild it
                     ReverseBricksTraj(groupSyncRead, listOffset, true);
-                    if(quitType == 'q' || quitType == 'Q'){ break; }
+                    if(quitType == 'q' || quitType == 'Q' || quitType == 'e'){ break; }
                     RunBricksTraj(groupSyncRead, listOffset, true, waitBtn);
-                    if(quitType == 'q' || quitType == 'Q'){ break; }
+                    if(quitType == 'q' || quitType == 'Q' || quitType == 'e'){ break; }
                     loopCount += 1;
                     now = time(0); fn = localtime(&now); if(fn->tm_hour >= SleepTime) { break; } // quit loop after sleep time
                     if(quitType != 'f' && !waitBtn){
@@ -549,7 +549,7 @@ int main()
                     // always reverse from a complete built, then rebuild it
                     RunDemoTraj(groupSyncRead, true);
                     loopCount += 1;
-                    if(quitType == 'q' || quitType == 'Q'){ break; }
+                    if(quitType == 'q' || quitType == 'Q' || quitType == 'e'){ break; }
                     cout << "Taking a 5 sec rest ;) \n"; Sleep(5000); // Sleep for a while before next run for every 8 loop 
                     if(!(loopCount%25)){ cout << "Taking a 15 minute rest~ ^O^ \n\n"; Sleep(1000*900); } // Sleep for a while before next run for every 400 loop
                 }
@@ -558,7 +558,7 @@ int main()
         }
         now = time(0); fn = localtime(&now);
         if(fn->tm_hour >= SleepTime) { cout << "\nATTENTION: Exhibit closing time. Thank you!\n" << endl; cmd = 'n'; }
-    } while(cmd != 'n');
+    } while(cmd != 'n' && quitType != 'e');
 
     //// Safe system shut down, safe last pos and emegency shut down
     // Saving last position before quiting programme
@@ -645,11 +645,6 @@ bool SetSerialParams(){
     // Set recieve mask                
     if (!(bool)SetCommMask(hComm, EV_RXCHAR)){ cout << "Error! in Setting CommMask\n"; }
     
-    // // send start signal 's' to arduino
-    // Ard_char[0] = 'i';
-    // if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; }
-    // Ard_char[0] = 's';
-    // if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; }
     return true;
 }
 
@@ -768,7 +763,7 @@ int RaiseRailTo(double target){ // !!! Define velocity limit !!!
         if(kbhit()){ // Emergency quit during trajectory control
             cout << "\nSystem interrupted!! Do you want to quit the trajectory control?\nq - Quit trajectory\nf - Finish this loop of motion\nr - Resume trajectory\n";
             cin >> quitType;
-            if(quitType == 'q' || quitType == 'Q'){
+            if(quitType == 'q' || quitType == 'Q' || quitType == 'e'){
                 cout << "Trajectory emergency quit\n";
                 nodeList[8]->Port.BrakeControl.BrakeSetting(0, BRAKE_PREVENT_MOTION); // enable brake after
                 return -1;
@@ -852,6 +847,10 @@ int RunParaBlend(double point[7], bool showAttention){
         // cout << "OUT: "<<  out1[0] << "\t" << out1[1] << "\t" << out1[2] << "\t" << out1[3] << "\t" <<  out1[4] << "\t" << out1[5] << "\t" << out1[6] << "\t" << out1[7] << endl;
 
         SendMotorGrp();
+        if(quitType == 'e'){ // Motor error message?
+            cout << "WARNING! Motor error message received. System will now shut now.\n";
+            return -4;
+        }
 
         // Write to traking file
         ofstream myfile;
@@ -1257,7 +1256,13 @@ void SendMotorCmd(int n){
     }
     catch(sFnd::mnErr& theErr) {    //This catch statement will intercept any error from the Class library
         cout << "\nERROR: Motor [" << n << "] command failed.\n";  
-        printf("Caught error: addr=%d, err=0x%08x\nmsg=%s\n", theErr.TheAddr, theErr.ErrorCode, theErr.ErrorMsg);    
+        printf("Caught error: addr=%d, err=0x%08x\nmsg=%s\n", theErr.TheAddr, theErr.ErrorCode, theErr.ErrorMsg);
+        quitType = 'e';
+        ofstream myfile;
+        myfile.open("log.txt", ios::app);
+        myfile << "\nERROR: Motor [" << n << "] command failed.\n";
+        myfile << "Caught error: addr="<< (int) theErr.TheAddr<<", err="<<hex<<theErr.ErrorCode <<"\nmsg="<<theErr.ErrorMsg<<"\n";
+        myfile.close();
     }
 }
 
@@ -1285,7 +1290,7 @@ void SendMotorGrp(bool IsTorque, bool IsLinearRail){
     for(int i = 0; i < NodeNum; i++){
         nodeThreads[i].join();
     }
-    myPort.Adv.TriggerMovesInGroup(1);
+    if (quitType!='e'){ myPort.Adv.TriggerMovesInGroup(1); } // Only move all if no error is caugth
 }
 
 void TrjHome(){// !!! Define the task space velocity limit for homing !!!
