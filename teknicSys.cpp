@@ -891,7 +891,7 @@ double ScaleRailLvl(double brickLvl){
 
 void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset, bool showAttention, bool waitBtn){
     // 0.75 0.865 1.6 p10 //{0.6723, 1.3195, 1.4611
-    double brickPickUp[7] = {0.757, 0.8643, 1.592, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!, the last digit is a dummy number for time duration.
+    double brickPickUp[7] = {0.768, 0.8633, 1.599, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!, the last digit is a dummy number for time duration.
     double safePt[3] = {1.5, 1.37, 1.65}; // a safe area near to the arm // 0.21 safe height from ABB
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
     double velLmt = 0.14; // meters per second

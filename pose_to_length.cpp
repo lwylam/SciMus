@@ -12,14 +12,14 @@ void pose_to_length(double pose[], double lengths[], double rail_offset){
     const int direction[8] = {1,1,1,1,-1,-1,-1,-1};
 
     Vector3d frmOut[CABLE_NUM]; // coordinates of the attachment points on frame at the beginning
-    frmOut[0] << 0.09257, -0.2196, 2.4409;
-    frmOut[1] << 3.5695, -0.2074, 2.4411;
-    frmOut[2] << 3.5619, 3.4526, 2.4557;
-    frmOut[3] << 0.0919, 3.4458, 2.4486;
+    frmOut[0] << 0.09815, -0.2148, 2.44361;
+    frmOut[1] << 3.569883, -0.20463, 2.440872;
+    frmOut[2] << 3.568272, 3.456681, 2.447516;
+    frmOut[3] << 0.097432, 3.454197, 2.444336;
     frmOut[4] << 0.00, -0.0325, -0.050 + rail_offset; //motors connected to linear rails, coordinates when rail offset is 0
-    frmOut[5] << 3.6634, -0.0325, -0.05042 + rail_offset;
-    frmOut[6] << 3.6762, 3.2782, -0.0476 + rail_offset;
-    frmOut[7] << 0.0157, 3.2789, -0.0478 + rail_offset;
+    frmOut[5] << 3.6647, -0.0325, -0.0523 + rail_offset;
+    frmOut[6] << 3.6760, 3.2815, -0.05332 + rail_offset;
+    frmOut[7] << 0.0145, 3.2815, -0.0529 + rail_offset;
 
     Vector3d frmOutUnitV[CABLE_NUM]; // unit vectors/directions of the fixed cable attachments on frame
     for(int i = 0; i < CABLE_NUM; i++){ frmOutUnitV[i] << 0, 0, direction[i]; }
