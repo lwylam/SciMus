@@ -40,6 +40,7 @@ const double RAIL_UP = 1.25, RAIL_DOWN = 0; // Linear rail upper and lower bound
 const double endEffOffset = -0.125; // meters, offset from endeffector to ground
 double step = 0.01; // in meters, for manual control
 float targetTorque = -2.5; // in %, -ve for tension, also need to UPDATE in switch case 't'!!!!!!!!!
+const float absTorqueLmt = 60.0; // Absolute torque limit, to be checked before commanding 8 motors to move simutaneously in length command
 const int MILLIS_TO_NEXT_FRAME = 35, UserInput_Sec_Timeout = 15, SleepTime = 21; // note the basic calculation time is abt 16ms; sleep-time in 24 hr
 double home[6] = {1.5, 1.5, 1.4, 0, 0, 0}; // home posisiton
 double offset[12]; // L0, from "zero position", will be updated by "set home" command
@@ -1252,14 +1253,24 @@ int32_t ToMotorCmd(int motorID, double length){ // applicable for all 12 motors
 }
 
 void SendMotorCmd(int n){
+    ofstream myfile;
     // convert to absolute cable length command
     try{
         int32_t step = ToMotorCmd(n, out1[n]);
         nodeList[n]->Motion.MoveWentDone();
         nodeList[n]->Motion.MovePosnStart(step, true, true); // absolute position
+        float trq = nodeList[n]->Motion.TrqMeasured.Value();
+        if(abs(trq)>absTorqueLmt){
+            myfile.open("log.txt", ios::app);
+            myfile << "Motor [" << n << "] exceeds torque limit: " << trq;
+            myfile.close();
+            quitType = 'e';
+            cout << "ATTENTION: Motor [" << n << "] exceeds torque limit: " << trq << endl;
+        }
         nodeList[n]->Motion.Adv.TriggerGroup(1);
+
         if (nodeList[n]->Status.Alerts.Value().isInAlert()) {
-            ofstream myfile; myfile.open("log.txt", ios::app);
+            myfile.open("log.txt", ios::app);
             myfile << "Alert from Motor [" << n << "]: "<< nodeList[n]->Status.Alerts.Value().bits <<"\n";
             myfile.close();
         }
@@ -1268,9 +1279,9 @@ void SendMotorCmd(int n){
         cout << "\nERROR: Motor [" << n << "] command failed.\n";  
         printf("Caught error: addr=%d, err=0x%08x\nmsg=%s\n", theErr.TheAddr, theErr.ErrorCode, theErr.ErrorMsg);
         quitType = 'e';
-        ofstream myfile;
+        tm *fn; time_t now = time(0); fn = localtime(&now);
         myfile.open("log.txt", ios::app);
-        myfile << "\nERROR: Motor [" << n << "] command failed.\n";
+        myfile << "\nERROR: Motor [" << n << "] command failed. " << fn->tm_hour << ":"<< fn->tm_min << ":" << fn->tm_sec <<"\n";
         myfile << "Caught error: addr="<< (int) theErr.TheAddr<<", err="<<hex<<theErr.ErrorCode <<"\nmsg="<<theErr.ErrorMsg<<"\n";
         myfile.close();
     }
