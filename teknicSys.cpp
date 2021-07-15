@@ -55,7 +55,7 @@ dynamixel::PortHandler *portHandler;
 dynamixel::PacketHandler *packetHandler;
 uint8_t dxl_error = 0; // Dynamixel error
 int32_t dxl1Pos = 0, dxl2Pos = 0, gpOpen = -30, gpClose = 80, neutralRot = 1820; // define some position reading, and gripper commands. neutralRot is 1024.90 deg // 1820 is 160 deg
-int dxl_comm_result, rotationG, gripperG;
+int dxl_comm_result, rotationG, gripperG, dxl_pre_pos = 0;
 const int DXL1_ID = 1, DXL2_ID = 2; //dxl 1 is rotation motor, dxl 2 is gripper motor
 const int ADDR_TORQUE_ENABLE = 64, ADDR_GOAL_POSITION = 116, ADDR_PRESENT_POSITION = 132, ADDR_GOAL_CURRENT = 102, ADDR_PRESENT_CURRENT = 126; // Control table adresses
 const int LEN_GOAL_POSITION = 4, LEN_PRESENT_POSITION = 4, LEN_GOAL_CURRENT = 2, LEN_PRESENT_CURRENT = 2, DXL_THRESHOLD = 10;
@@ -364,6 +364,11 @@ int main()
                 while(cmd != 'q' && cmd != 'Q'){
                     cmd = getch();
                     switch(cmd){
+                        // case 'K': // Read Dynamixel#2 current position // TODO: cannot read feedback?
+                        // case 'k':
+                        //     if(packetHandler->read4ByteTxRx(portHandler, DXL2_ID, ADDR_PRESENT_POSITION, (uint32_t*)&dxl_pre_pos, &dxl_error)){ cout << "Error in reading gripper positio\n"; }
+                        //     else{ cout << "Gripper position: " << dxl_pre_pos << endl; }
+                        //     continue;
                         case 'I':
                         case 'i':
                             if(packetHandler->write2ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_CURRENT, gpClose, &dxl_error)){ cout << "Error in closing gripper\n"; }
@@ -891,7 +896,7 @@ double ScaleRailLvl(double brickLvl){
 
 void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset, bool showAttention, bool waitBtn){
     // 0.75 0.865 1.6 p10 //{0.6723, 1.3195, 1.4611
-    double brickPickUp[7] = {0.768, 0.8633, 1.599, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!, the last digit is a dummy number for time duration.
+    double brickPickUp[7] = {0.765, 0.8693, 1.604, 0, 0, 0, 10}; // !!!! Define the brick pick up point !!!!, the last digit is a dummy number for time duration.
     double safePt[3] = {1.5, 1.37, 1.65}; // a safe area near to the arm // 0.21 safe height from ABB
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
     double velLmt = 0.14; // meters per second
@@ -983,7 +988,7 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
                 else{
                     msgCnt = 0; // Restart msg count
                     timeout_i += 1;
-                    if (!(timeout_i%6)){ // Send hard code open to ABB after some timeout; 20 loops is ard 5 min
+                    if (!(timeout_i%3)){ // Send hard code open to ABB after some timeout; 20 loops is ard 5 min
                         Ard_char[0] = 'c'; // Hard code signal arduino to close ABB gripper
                         if (!(bool)WriteFile(hComm, Ard_char, 1, &dNoOfBytesWritten, NULL)){ cout << "Arduino writing error: " << GetLastError() << endl; quitType = 'q'; return; }
                         Sleep(3000); // Wait a bit before sending next signal
@@ -1012,7 +1017,7 @@ void RunBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOffset
                 }
             } while (tmp != 'o'); // while (BytesRead > 0 && tmp != 'o');
         }
-        Sleep(7000); // wait for ABB to return stand by pos??? // fastest 7000
+        Sleep(4000); // wait for ABB to return stand by pos??? // fastest 7000
 
         // Go to building level
         if(showAttention) { cout << "Raising brick from ABB\n"; }
@@ -1069,8 +1074,8 @@ void ReverseBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOf
     double brickDropOff[7] = {0.72, 2.14, 1.9, 0, 0, 0, 10}; // !!!! Define the brick drop off point !!!!, the last digit is a dummy number for time duration. // rotation 165 for drop off
     double safePt[3] = {1.6, 1.8, 2.05}; // a safe area near the drop off
     double goalPos[7] = {2, 2, 1, 0, 0, 0, 10}; // updated according to brick position
-    double velLmt = 0.28; // meters per second
-    double safeT = 1200; // in ms, time to raise to safety height
+    double velLmt = 0.27; // meters per second
+    double safeT = 1100; // in ms, time to raise to safety height //1200 ms
     double safeH = 0.08; // meter, safety height from building brick level
     double currentBrkLvl = railOffset; // meter, check if the rail offset is the same as target BrkLvl
     double dura = 0;
@@ -1099,7 +1104,7 @@ void ReverseBricksTraj(const dynamixel::GroupSyncRead &groupSyncRead, int listOf
         if(packetHandler->write2ByteTxRx(portHandler, DXL2_ID, ADDR_GOAL_CURRENT, gpOpen, &dxl_error)){ cout << "Error in opening gripper\n"; return; }
         copy(in1, in1+2, begin(goalPos));
         goalPos[2] = brickPos[i][2] + endEffOffset + safeH; // brick level
-        goalPos[6] = sqrt(pow(goalPos[2]-in1[2],2))/velLmt*1000; // calculate time
+        goalPos[6] = sqrt(pow(goalPos[2]-in1[2],2))/velLmt*1000 + 800; // calculate time + hardcode time to smooth out sudden jump
         if(RunParaBlend(goalPos) < 0) { cout << "Trajectory aborted.\n"; return; } // raise from current pos to builing level
         
         // Go to brick placing position
@@ -1253,6 +1258,11 @@ void SendMotorCmd(int n){
         nodeList[n]->Motion.MoveWentDone();
         nodeList[n]->Motion.MovePosnStart(step, true, true); // absolute position
         nodeList[n]->Motion.Adv.TriggerGroup(1);
+        if (nodeList[n]->Status.Alerts.Value().isInAlert()) {
+            ofstream myfile; myfile.open("log.txt", ios::app);
+            myfile << "Alert from Motor [" << n << "]: "<< nodeList[n]->Status.Alerts.Value().bits <<"\n";
+            myfile.close();
+        }
     }
     catch(sFnd::mnErr& theErr) {    //This catch statement will intercept any error from the Class library
         cout << "\nERROR: Motor [" << n << "] command failed.\n";  
@@ -1290,6 +1300,7 @@ void SendMotorGrp(bool IsTorque, bool IsLinearRail){
     for(int i = 0; i < NodeNum; i++){
         nodeThreads[i].join();
     }
+    // myPort.Adv.TriggerMovesInGroup(1);
     if (quitType!='e'){ myPort.Adv.TriggerMovesInGroup(1); } // Only move all if no error is caugth
 }
 
